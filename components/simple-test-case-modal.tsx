@@ -1,11 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { getAllExecutionConfigs } from "@/service/config" // Adjust import path as needed
 
 interface SimpleTestCaseModalProps {
   open: boolean
@@ -14,19 +15,26 @@ interface SimpleTestCaseModalProps {
   scenarioId: number
 }
 
+interface ExecutionConfig {
+  id: number
+  name: string
+  browser: string
+  browserVersion: string
+  os: string
+  osVersion: string
+  device: string
+  chromeDriverPath: string
+}
+
 export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: SimpleTestCaseModalProps) {
   const [formData, setFormData] = useState({
-    test_classification: "",
-    run_config: "",
-    test_item: "",
+    testClassification: "",
+    runConfig: "",
+    testItem: "",
   })
 
-  const mockRunConfigs = [
-    { id: "chrome-win", name: "Chrome Windows", browser: "Chrome", version: "116", os: "Windows 11" },
-    { id: "firefox-mac", name: "Firefox macOS", browser: "Firefox", version: "118", os: "macOS 13" },
-    { id: "safari-mac", name: "Safari macOS", browser: "Safari", version: "16", os: "macOS 13" },
-    { id: "edge-win", name: "Edge Windows", browser: "Edge", version: "116", os: "Windows 11" },
-  ]
+  const [executionConfigs, setExecutionConfigs] = useState<ExecutionConfig[]>([])
+  const [isLoadingConfigs, setIsLoadingConfigs] = useState(false)
 
   const testClassifications = [
     "Functional Testing",
@@ -39,29 +47,50 @@ export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: 
     "Regression Testing",
   ]
 
+  // Load execution configs when modal opens
+  useEffect(() => {
+    if (open) {
+      loadExecutionConfigs()
+    }
+  }, [open])
+
+  const loadExecutionConfigs = async () => {
+    setIsLoadingConfigs(true)
+    try {
+      const configs = await getAllExecutionConfigs()
+      setExecutionConfigs(configs)
+    } catch (error) {
+      console.error("Error loading execution configs:", error)
+      // You might want to show an error message to the user
+    } finally {
+      setIsLoadingConfigs(false)
+    }
+  }
+
   const handleSave = () => {
-    if (!formData.test_classification || !formData.run_config || !formData.test_item.trim()) {
+    if (!formData.testClassification || !formData.runConfig || !formData.testItem.trim()) {
       return
     }
 
-    const newTestCase = {
-      id: Date.now(),
-      scenario_id: scenarioId,
-      test_classification: formData.test_classification,
-      run_config: formData.run_config,
-      test_item: formData.test_item,
-      steps: [],
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+    // Find the selected config to get more details if needed
+    const selectedConfig = executionConfigs.find(config => config.id.toString() === formData.runConfig)
+
+    // Prepare data for API call
+    const apiData = {
+      scenarioId: scenarioId.toString(),
+      testItem: formData.testItem,
+      testClassification: formData.testClassification,
+      runConfig: formData.runConfig, // Include runConfig for frontend use
+      configDetails: selectedConfig, // Include full config details if needed
     }
 
-    onSave(newTestCase)
+    onSave(apiData)
 
     // Reset form
     setFormData({
-      test_classification: "",
-      run_config: "",
-      test_item: "",
+      testClassification: "",
+      runConfig: "",
+      testItem: "",
     })
 
     onOpenChange(false)
@@ -70,9 +99,9 @@ export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: 
   const handleCancel = () => {
     // Reset form
     setFormData({
-      test_classification: "",
-      run_config: "",
-      test_item: "",
+      testClassification: "",
+      runConfig: "",
+      testItem: "",
     })
     onOpenChange(false)
   }
@@ -88,8 +117,8 @@ export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: 
           <div className="space-y-2">
             <Label htmlFor="test-classification">Test Classification</Label>
             <Select
-              value={formData.test_classification}
-              onValueChange={(value) => setFormData((prev) => ({ ...prev, test_classification: value }))}
+              value={formData.testClassification}
+              onValueChange={(value) => setFormData((prev) => ({ ...prev, testClassification: value }))}
             >
               <SelectTrigger>
                 <SelectValue placeholder="Select test classification" />
@@ -107,20 +136,34 @@ export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: 
           <div className="space-y-2">
             <Label htmlFor="run-config">Choose Run Config</Label>
             <Select
-              value={formData.run_config}
-              onValueChange={(value) => setFormData((prev) => ({ ...prev, run_config: value }))}
+              value={formData.runConfig}
+              onValueChange={(value) => setFormData((prev) => ({ ...prev, runConfig: value }))}
+              disabled={isLoadingConfigs}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Select run configuration" />
+                <SelectValue 
+                  placeholder={isLoadingConfigs ? "Loading configurations..." : "Select run configuration"} 
+                />
               </SelectTrigger>
               <SelectContent>
-                {mockRunConfigs.map((config) => (
-                  <SelectItem key={config.id} value={config.id}>
-                    {config.name} ({config.browser} on {config.os})
+                {executionConfigs.length === 0 && !isLoadingConfigs ? (
+                  <SelectItem value="" disabled>
+                    No execution configs available
                   </SelectItem>
-                ))}
+                ) : (
+                  executionConfigs.map((config) => (
+                    <SelectItem key={config.id} value={config.id.toString()}>
+                      {config.name} ({config.browser} {config.browserVersion} on {config.os} {config.osVersion})
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
+            {executionConfigs.length === 0 && !isLoadingConfigs && (
+              <p className="text-sm text-muted-foreground">
+                No execution configs found. Please create one in the Configuration Management section.
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -128,8 +171,8 @@ export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: 
             <Textarea
               id="test-item"
               placeholder="Describe what will be tested..."
-              value={formData.test_item}
-              onChange={(e) => setFormData((prev) => ({ ...prev, test_item: e.target.value }))}
+              value={formData.testItem}
+              onChange={(e) => setFormData((prev) => ({ ...prev, testItem: e.target.value }))}
               rows={4}
             />
           </div>
@@ -140,7 +183,13 @@ export function SimpleTestCaseModal({ open, onOpenChange, onSave, scenarioId }: 
             </Button>
             <Button
               onClick={handleSave}
-              disabled={!formData.test_classification || !formData.run_config || !formData.test_item.trim()}
+              disabled={
+                !formData.testClassification || 
+                !formData.runConfig || 
+                !formData.testItem.trim() || 
+                isLoadingConfigs ||
+                executionConfigs.length === 0
+              }
             >
               Save & Continue to Steps
             </Button>

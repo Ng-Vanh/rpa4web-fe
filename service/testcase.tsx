@@ -32,5 +32,20 @@ const getTestCaseById = async (id: number) => {
         throw error;
     }
 }
+const createTestCase = async (data: any) => {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/test-cases`, data, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders(),
+            },
+        });
+        console.log('Created test case:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error creating test case:", error);
+        throw error;
+    }
+}
 
-export { getAllTestCases, getTestCaseById };
+export { getAllTestCases, getTestCaseById, createTestCase };

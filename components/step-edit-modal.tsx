@@ -13,7 +13,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Upload, Trash2, Save, X } from "lucide-react"
+import { uploadStepImage } from "@/service/testcase-step"
+import { Save, Trash2, Upload, X } from "lucide-react"
+
+// ... existing imports ...
 
 interface StepEditModalProps {
   isOpen: boolean
@@ -24,44 +27,58 @@ interface StepEditModalProps {
 
 export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalProps) {
   const [formData, setFormData] = useState({
-    action_description: "",
-    input_data: "",
-    expected_result: "",
+    actionDescription: "",
+    inputData: "",
+    expectedOutput: "", // Changed from expectedResult to expectedOutput to match API
   })
   const [stepImage, setStepImage] = useState<File | null>(null)
   const [stepImageUrl, setStepImageUrl] = useState<string>("")
+  const [imageUploadLoading, setImageUploadLoading] = useState(false)
 
   useEffect(() => {
     if (step && isOpen) {
       setFormData({
-        action_description: step.action_description || "",
-        input_data: step.input_data || "",
-        expected_result: step.expected_result || "",
+        actionDescription: step.actionDescription || step.action_description || "",
+        inputData: step.inputData || step.input_data || "",
+        expectedOutput: step.expectedOutput || step.expected_output || step.expectedResult || step.expected_result || "",
       })
-      setStepImageUrl(step.stepImageUrl || step.img_url || "")
+      setStepImageUrl(step.imgUrl || step.stepImageUrl || step.img_url || "")
       setStepImage(step.stepImage || null)
     }
   }, [step, isOpen])
 
-  const handleSave = () => {
-    const updatedStep = {
-      ...step,
-      ...formData,
-      stepImage,
-      stepImageUrl,
+  const handleSave = async () => {
+    try {
+      setImageUploadLoading(true);
+
+      const updatedStep = {
+        ...step,
+        // Use consistent field names that match API expectations
+        actionDescription: formData.actionDescription,
+        inputData: formData.inputData,
+        expectedOutput: formData.expectedOutput,
+        stepImage: stepImage instanceof File ? stepImage : undefined, // Send actual file to API
+        imgUrl: stepImageUrl, // Keep for UI display
+      }
+
+      await onSave(updatedStep);
+      onClose();
+    } catch (error) {
+      console.error("Error saving step:", error);
+      alert("Error saving step. Please try again.");
+    } finally {
+      setImageUploadLoading(false);
     }
-    onSave(updatedStep)
-    onClose()
   }
 
   const handleCancel = () => {
     if (step) {
       setFormData({
-        action_description: step.action_description || "",
-        input_data: step.input_data || "",
-        expected_result: step.expected_result || "",
+        actionDescription: step.actionDescription || step.action_description || "",
+        inputData: step.inputData || step.input_data || "",
+        expectedOutput: step.expectedOutput || step.expected_output || step.expectedResult || step.expected_result || "",
       })
-      setStepImageUrl(step.stepImageUrl || step.img_url || "")
+      setStepImageUrl(step.imgUrl || step.stepImageUrl || step.img_url || "")
       setStepImage(step.stepImage || null)
     }
     onClose()
@@ -75,7 +92,7 @@ export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalPr
 
   const handleImageRemove = () => {
     setStepImage(null)
-    setStepImageUrl(`/placeholder.svg?height=200&width=300&query=step-${step?.step_order || 1}-screenshot`)
+    setStepImageUrl("")
   }
 
   if (!step) return null
@@ -84,7 +101,9 @@ export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalPr
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Edit Step {step.step_order}</DialogTitle>
+          <DialogTitle>
+            {step.id && typeof step.id === 'number' && step.id > 0 ? 'Edit' : 'Add New'} Step {step.stepOrder}
+          </DialogTitle>
           <DialogDescription>
             Modify the step attributes and upload a reference image to help describe UI elements or actions.
           </DialogDescription>
@@ -93,35 +112,36 @@ export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalPr
         <div className="space-y-6 py-4">
           {/* Step Description */}
           <div className="space-y-2">
-            <Label htmlFor="action_description">Step Description</Label>
+            <Label htmlFor="actionDescription">Step Description *</Label>
             <Textarea
-              id="action_description"
-              value={formData.action_description}
-              onChange={(e) => setFormData({ ...formData, action_description: e.target.value })}
+              id="actionDescription"
+              value={formData.actionDescription}
+              onChange={(e) => setFormData({ ...formData, actionDescription: e.target.value })}
               placeholder="Enter step description..."
               className="min-h-[80px]"
+              required
             />
           </div>
 
           {/* Input Data */}
           <div className="space-y-2">
-            <Label htmlFor="input_data">Input Data</Label>
+            <Label htmlFor="inputData">Input Data</Label>
             <Input
-              id="input_data"
-              value={formData.input_data}
-              onChange={(e) => setFormData({ ...formData, input_data: e.target.value })}
+              id="inputData"
+              value={formData.inputData}
+              onChange={(e) => setFormData({ ...formData, inputData: e.target.value })}
               placeholder="Enter input data (optional)"
             />
           </div>
 
-          {/* Expected Result */}
+          {/* Expected Output */}
           <div className="space-y-2">
-            <Label htmlFor="expected_result">Expected Result</Label>
+            <Label htmlFor="expectedOutput">Expected Output</Label>
             <Textarea
-              id="expected_result"
-              value={formData.expected_result}
-              onChange={(e) => setFormData({ ...formData, expected_result: e.target.value })}
-              placeholder="Enter the expected result of this step..."
+              id="expectedOutput"
+              value={formData.expectedOutput}
+              onChange={(e) => setFormData({ ...formData, expectedOutput: e.target.value })}
+              placeholder="Enter the expected output of this step..."
               className="min-h-[80px]"
             />
           </div>
@@ -135,11 +155,20 @@ export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalPr
             <div className="flex gap-4">
               <div className="flex-1">
                 <div className="aspect-video bg-muted rounded-lg overflow-hidden">
-                  <img
-                    src={stepImageUrl || "/placeholder.svg"}
-                    alt={`Step ${step.step_order} reference image`}
-                    className="w-full h-full object-cover"
-                  />
+                  {stepImageUrl ? (
+                    <img
+                      src={stepImageUrl}
+                      alt={`Step ${step.stepOrder} reference image`}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                      <div className="text-center">
+                        <Upload className="h-8 w-8 mx-auto mb-2" />
+                        <p className="text-sm">No image uploaded</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="flex flex-col gap-2">
@@ -160,7 +189,7 @@ export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalPr
                     </span>
                   </Button>
                 </label>
-                {stepImage && (
+                {stepImageUrl && (
                   <Button variant="outline" size="sm" onClick={handleImageRemove}>
                     <Trash2 className="h-4 w-4 mr-2" />
                     Remove
@@ -172,13 +201,16 @@ export function StepEditModal({ isOpen, onClose, step, onSave }: StepEditModalPr
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel}>
+          <Button variant="outline" onClick={handleCancel} disabled={imageUploadLoading}>
             <X className="h-4 w-4 mr-2" />
             Cancel
           </Button>
-          <Button onClick={handleSave}>
+          <Button 
+            onClick={handleSave} 
+            disabled={!formData.actionDescription.trim() || imageUploadLoading}
+          >
             <Save className="h-4 w-4 mr-2" />
-            Save Changes
+            {imageUploadLoading ? "Uploading..." : "Save Changes"}
           </Button>
         </DialogFooter>
       </DialogContent>

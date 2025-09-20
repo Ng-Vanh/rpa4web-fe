@@ -182,7 +182,7 @@ export function SRSManagement({ onBack, onNavigateToWorkspace }: SRSManagementPr
         </div>
 
         {/* Debug section - remove in production */}
-        <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+        {/* <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
           <h4 className="font-semibold mb-2">Debug Info:</h4>
           <div className="text-sm space-y-1">
             <p>User ID: {getUserId() || 'Not found'}</p>
@@ -211,7 +211,7 @@ export function SRSManagement({ onBack, onNavigateToWorkspace }: SRSManagementPr
               Clear All Data
             </Button>
           </div>
-        </div>
+        </div> */}
 
         <div className="space-y-4">
           {filteredSRS.map((srs) => (

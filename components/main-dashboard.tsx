@@ -96,26 +96,11 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
             <h1 className="text-xl font-semibold">RPA4Web Testing Tool</h1>
           </div>
           <div className="ml-auto flex items-center space-x-4">
-            <DropdownMenu>
-  <DropdownMenuTrigger asChild>
-    <Button variant="outline" size="sm">
-      <Settings className="h-4 w-4 mr-2" />
-      Edit Config
-      <ChevronDown className="h-4 w-4 ml-2" />
-    </Button>
-  </DropdownMenuTrigger>
-  <DropdownMenuContent align="end">
-    <DropdownMenuItem onClick={() => setLlmConfigOpen(true)}>
-      LLM Config
-    </DropdownMenuItem>
-    <DropdownMenuItem onClick={() => setRunConfigOpen(true)}>
-      Run Config
-    </DropdownMenuItem>
-    <DropdownMenuItem onClick={handleManageRunConfigs}>
-      Manage Run Config
-    </DropdownMenuItem>
-  </DropdownMenuContent>
-</DropdownMenu>
+            <Button variant="outline" size="sm" onClick={handleManageRunConfigs}>
+              <Settings className="h-4 w-4 mr-2" />
+              Config
+            </Button>
+
 
 
             <Dialog open={llmConfigOpen} onOpenChange={setLlmConfigOpen}>

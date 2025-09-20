@@ -9,10 +9,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Plus, Play, Settings, User, Globe, CheckCircle } from "lucide-react"
 import { TestCaseDetailScreen } from "@/components/test-case-detail-screen"
-import { TestCaseCreationScreen } from "@/components/test-case-creation-screen"
 import { SimpleTestCaseModal } from "@/components/simple-test-case-modal"
 import { getListTestScenarios } from "@/service/testscenario"
-import { getAllTestCases } from "@/service/testcase"
+import { getAllTestCases, createTestCase } from "@/service/testcase"
+import { toast } from "@/components/ui/use-toast" // Thêm toast để hiển thị thông báo
 
 interface TestScenarioScreenProps {
   onBack: () => void
@@ -42,6 +42,7 @@ interface TestCase {
   },
   testItem: string,
   testClassification: string,
+  runConfig?: string, // Thêm runConfig
   createdAt: string,
   updatedAt: string
 }
@@ -58,16 +59,9 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
   const [selectedRunConfig, setSelectedRunConfig] = useState("")
   const [loading, setLoading] = useState(true)
   const [testCasesLoading, setTestCasesLoading] = useState(false)
+  const [createTestCaseLoading, setCreateTestCaseLoading] = useState(false) // Thêm loading state
 
-  const mockLLMConfigs = [
-    { id: "gpt4", name: "GPT-4 Config", model: "gpt-4", key: "sk-..." },
-    { id: "claude", name: "Claude Config", model: "claude-3", key: "sk-..." },
-  ]
 
-  const mockRunConfigs = [
-    { id: "chrome-win", name: "Chrome Windows", browser: "Chrome", version: "116", os: "Windows 11" },
-    { id: "firefox-mac", name: "Firefox macOS", browser: "Firefox", version: "118", os: "macOS 13" },
-  ]
 
   // Fetch test scenarios when component mounts
   useEffect(() => {
@@ -82,6 +76,11 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
       } catch (error) {
         console.error("Failed to fetch test scenarios:", error)
         setScenarios([])
+        toast({
+          title: "Error",
+          description: "Failed to load test scenarios",
+          variant: "destructive",
+        })
       } finally {
         setLoading(false)
       }
@@ -105,6 +104,11 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
       } catch (error) {
         console.error("Failed to fetch test cases:", error)
         setTestCases([])
+        toast({
+          title: "Error",
+          description: "Failed to load test cases",
+          variant: "destructive",
+        })
       } finally {
         setTestCasesLoading(false)
       }
@@ -114,13 +118,15 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
   }, [selectedScenario])
 
   const handleNewTestCase = () => {
+    if (!selectedScenario) {
+      toast({
+        title: "Error",
+        description: "Please select a scenario first",
+        variant: "destructive",
+      })
+      return
+    }
     setIsSimpleTestCaseModalOpen(true)
-  }
-
-  const handleContinueToWorkspace = (newTestCase: any) => {
-    setTestCases((prev) => [...prev, newTestCase])
-    setSelectedTestCase(newTestCase)
-    setCurrentView("testcase")
   }
 
   const handleTestCaseClick = (testCase: any) => {
@@ -133,20 +139,44 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
     setSelectedTestCase(null)
   }
 
-  const handleBackFromCreation = () => {
-    setCurrentView("scenarios")
-  }
-
   const handleConfigSelection = () => {
     console.log("Selected configs:", { llm: selectedLLMConfig, run: selectedRunConfig })
     setIsConfigDialogOpen(false)
   }
 
-  const handleSaveSimpleTestCase = async (newTestCase: any) => {
-    // Add the new test case to local state
-    setTestCases((prev) => [...prev, newTestCase])
-    setSelectedTestCase(newTestCase)
-    setCurrentView("testcase")
+  // Sửa lại hàm handleSaveSimpleTestCase để gọi API
+  const handleSaveSimpleTestCase = async (testCaseData: any) => {
+    try {
+      setCreateTestCaseLoading(true)
+      
+      // Gọi API để tạo test case
+      const createdTestCase = await createTestCase(testCaseData)
+      
+      // Cập nhật local state với test case mới được tạo
+      setTestCases((prev) => [...prev, createdTestCase])
+      
+      // Chuyển đến view chi tiết test case
+      setSelectedTestCase(createdTestCase)
+      setCurrentView("testcase")
+      
+      // Hiển thị thông báo thành công
+      toast({
+        title: "Success",
+        description: "Test case created successfully",
+      })
+      
+    } catch (error) {
+      console.error("Failed to create test case:", error)
+      
+      // Hiển thị thông báo lỗi
+      toast({
+        title: "Error",
+        description: "Failed to create test case. Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setCreateTestCaseLoading(false)
+    }
   }
 
   const handleScenarioSelect = (scenario: TestScenario) => {
@@ -155,16 +185,6 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
 
   if (currentView === "testcase" && selectedTestCase) {
     return <TestCaseDetailScreen onBack={handleBackToScenarios} testCase={selectedTestCase} initialView="execution" />
-  }
-
-  if (currentView === "create-testcase") {
-    return (
-      <TestCaseCreationScreen
-        onBack={handleBackFromCreation}
-        onContinue={handleContinueToWorkspace}
-        scenarioId={selectedScenario?.id || 1}
-      />
-    )
   }
 
   return (
@@ -178,9 +198,12 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
           </Button>
           <h1 className="text-xl font-semibold">Test Scenarios</h1>
           <div className="ml-auto">
-            <Button onClick={handleNewTestCase} disabled={!selectedScenario}>
+            <Button 
+              onClick={handleNewTestCase} 
+              disabled={!selectedScenario || createTestCaseLoading}
+            >
               <Plus className="h-4 w-4 mr-2" />
-              New Test Case
+              {createTestCaseLoading ? "Creating..." : "New Test Case"}
             </Button>
           </div>
         </div>
@@ -257,16 +280,11 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-12">
-                      <input type="checkbox" className="rounded" />
-                    </TableHead>
                     <TableHead>Name</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Updated</TableHead>
                     <TableHead>Last Run</TableHead>
-                    <TableHead>Environment</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -276,15 +294,18 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                       className="cursor-pointer hover:bg-muted/50"
                       onClick={() => handleTestCaseClick(testCase)}
                     >
-                      <TableCell>
+                      {/* <TableCell>
                         <input type="checkbox" className="rounded" onClick={(e) => e.stopPropagation()} />
-                      </TableCell>
+                      </TableCell> */}
                       <TableCell>
                         <div>
                           <div className="font-medium">
                             {index + 1}. {testCase.testItem}
                           </div>
                           <div className="text-sm text-muted-foreground">{testCase.testClassification}</div>
+                          {testCase.runConfig && (
+                            <div className="text-xs text-muted-foreground">Config: {testCase.runConfig}</div>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
@@ -305,9 +326,9 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                           <div className="text-muted-foreground">-</div>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      {/* <TableCell>
                         <div className="text-sm">-</div>
-                      </TableCell>
+                      </TableCell> */}
                       <TableCell>
                         <div className="flex items-center space-x-1">
                           <CheckCircle className="h-4 w-4 text-green-600" />
@@ -315,64 +336,7 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                           <CheckCircle className="h-4 w-4 text-green-600" />
                         </div>
                       </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end space-x-1">
-                          <Button size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
-                            <Play className="h-3 w-3" />
-                          </Button>
-                          <Dialog open={isConfigDialogOpen} onOpenChange={setIsConfigDialogOpen}>
-                            <DialogTrigger asChild>
-                              <Button size="sm" variant="ghost" onClick={(e) => e.stopPropagation()}>
-                                <Settings className="h-3 w-3" />
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-md">
-                              <DialogHeader>
-                                <DialogTitle>Select Configuration</DialogTitle>
-                              </DialogHeader>
-                              <div className="space-y-4">
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium">LLM Configuration</label>
-                                  <Select value={selectedLLMConfig} onValueChange={setSelectedLLMConfig}>
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select LLM config" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {mockLLMConfigs.map((config) => (
-                                        <SelectItem key={config.id} value={config.id}>
-                                          {config.name} ({config.model})
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="space-y-2">
-                                  <label className="text-sm font-medium">Run Configuration</label>
-                                  <Select value={selectedRunConfig} onValueChange={setSelectedRunConfig}>
-                                    <SelectTrigger>
-                                      <SelectValue placeholder="Select run config" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {mockRunConfigs.map((config) => (
-                                        <SelectItem key={config.id} value={config.id}>
-                                          {config.name} ({config.browser} on {config.os})
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-                                <div className="flex justify-end space-x-2 pt-4">
-                                  <Button variant="outline" onClick={() => setIsConfigDialogOpen(false)}>
-                                    Cancel
-                                  </Button>
-                                  <Button onClick={handleConfigSelection}>Apply Configuration</Button>
-                                </div>
-                              </div>
-                            </DialogContent>
-                          </Dialog>
-                          <span className="text-muted-foreground">•••</span>
-                        </div>
-                      </TableCell>
+                     
                     </TableRow>
                   ))}
                 </TableBody>
@@ -387,7 +351,7 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
         open={isSimpleTestCaseModalOpen}
         onOpenChange={setIsSimpleTestCaseModalOpen}
         onSave={handleSaveSimpleTestCase}
-        scenarioId={selectedScenario?.id || 1}
+        scenarioId={selectedScenario?.id || 0}
       />
     </div>
   )
