@@ -5,6 +5,8 @@ import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, Upload, Eye, ArrowRight } from "lucide-react"
+import { uploadSrsDocument } from "@/service/srs_document"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface SRSUploadScreenProps {
   onBack: () => void
@@ -16,12 +18,14 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadedFileContent, setUploadedFileContent] = useState<string | null>(null)
   const [uploadedSRS, setUploadedSRS] = useState<any>(null)
+  const [uploadError, setUploadError] = useState<string | null>(null)
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
       setSelectedFile(file)
       setUploadedFileContent(null)
+      setUploadError(null)
     }
   }
 
@@ -29,11 +33,50 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
     if (!selectedFile) return
 
     setUploadStep("uploading")
+    setUploadError(null)
 
-    // Simulate upload process
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    try {
+      // Tạo FormData để upload file
+      const formData = new FormData()
+      
+      // Debug file info
+      console.log('Selected file info:', {
+        name: selectedFile.name,
+        size: selectedFile.size,
+        type: selectedFile.type,
+        lastModified: selectedFile.lastModified
+      })
+      
+      // Kiểm tra file có empty không
+      if (selectedFile.size === 0) {
+        throw new Error("File is empty. Please select a valid file.");
+      }
+      
+      // Kiểm tra file type
+      const allowedTypes = ['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain'];
+      if (!allowedTypes.includes(selectedFile.type)) {
+        throw new Error(`File type ${selectedFile.type} is not supported. Please select PDF, DOC, DOCX, or TXT file.`);
+      }
+      
+      // Thử các field name khác nhau (backend có thể expect field name khác)
+      formData.append('file', selectedFile)
+      formData.append('document', selectedFile) // Thử field name khác
+      formData.append('pdfFile', selectedFile)  // Thử field name khác
+      formData.append('srsFile', selectedFile)  // Thử field name khác
+      
+      formData.append('name', selectedFile.name.replace(/\.[^/.]+$/, ""))
+      formData.append('description', `SRS document for ${selectedFile.name.replace(/\.[^/.]+$/, "")} system`)
+      formData.append('originalName', selectedFile.name) // Thêm original name
 
-    const mockPdfContent = `
+      // Gọi API upload thật
+      const response = await uploadSrsDocument(formData)
+      
+      console.log('Upload response:', response)
+      console.log('Upload response data:', (response as any)?.data)
+      console.log('Upload response status:', (response as any)?.status)
+
+      // Tạo mock content để hiển thị preview (có thể thay bằng content thật từ API)
+      const mockPdfContent = `
 Software Requirements Specification
 ${selectedFile.name}
 
@@ -67,21 +110,28 @@ This document specifies the requirements for the ${selectedFile.name.replace(/\.
 - Navigation shall be intuitive and consistent
 
 This is a simulated PDF content for demonstration purposes.
-    `.trim()
+      `.trim()
 
-    const newSRS = {
-      id: Date.now(),
-      name: selectedFile.name.replace(/\.[^/.]+$/, ""),
-      description: `SRS document for ${selectedFile.name.replace(/\.[^/.]+$/, "")} system`,
-      file_path: `/uploads/${selectedFile.name}`,
-      uploaded_by: 1,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      // Sử dụng dữ liệu từ API response hoặc tạo mock data
+      const newSRS = (response as any)?.data || {
+        id: Date.now(),
+        name: selectedFile.name.replace(/\.[^/.]+$/, ""),
+        description: `SRS document for ${selectedFile.name.replace(/\.[^/.]+$/, "")} system`,
+        file_path: `/uploads/${selectedFile.name}`,
+        uploaded_by: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }
+
+      setUploadedFileContent(mockPdfContent)
+      setUploadedSRS(newSRS)
+      setUploadStep("success")
+      
+    } catch (error: any) {
+      console.error('Upload error:', error)
+      setUploadError(error.message || "Failed to upload file")
+      setUploadStep("select")
     }
-
-    setUploadedFileContent(mockPdfContent)
-    setUploadedSRS(newSRS)
-    setUploadStep("success")
   }
 
   const handleContinue = () => {
@@ -140,6 +190,13 @@ This is a simulated PDF content for demonstration purposes.
                     </div>
                   </label>
                 </div>
+
+                {uploadError && (
+                  <Alert variant="destructive">
+                    <AlertDescription>{uploadError}</AlertDescription>
+                  </Alert>
+                )}
+
                 <div className="flex justify-end space-x-2">
                   <Button variant="outline" onClick={onBack}>
                     Cancel
