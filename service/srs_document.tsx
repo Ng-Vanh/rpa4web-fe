@@ -1,5 +1,5 @@
 import axios from "axios";
-import { clearAuthData } from "./auth-utils";
+import { clearAuthData, getUserId } from "./auth-utils";
 const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
 
 // Helper function để lấy token từ localStorage
@@ -49,15 +49,77 @@ const getSrsDocument = async (userId: number) => {
 // Thêm các function khác nếu cần
 const uploadSrsDocument = async (formData: FormData) => {
   try {
-    const response = await axios.post(`${API_BASE_URL}/srs/upload`, formData, {
+    // Lấy user ID từ token (fallback method)
+    let userId = getUserId();
+    
+    // Nếu không lấy được từ token, gọi API /me để lấy thông tin user
+    if (!userId) {
+      console.log('Getting user info from API /me...');
+      const userInfo = await getCurrentUser();
+      userId = (userInfo as any)?.id || (userInfo as any)?.userId;
+      
+      if (!userId) {
+        throw new Error("User not authenticated. Please login again.");
+      }
+    }
+
+    // Thêm user ID vào FormData
+    formData.append('userId', userId.toString());
+
+    console.log('Uploading SRS document for user ID:', userId);
+    console.log('FormData contents:');
+    for (let [key, value] of formData.entries()) {
+      console.log(`${key}:`, value);
+    }
+    console.log('API URL:', `${API_BASE_URL}/srs/upload-file`);
+
+    const response = await axios.post(`${API_BASE_URL}/srs/upload-file`, formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        // Không set Content-Type, để axios tự động set với boundary
         ...getAuthHeaders(),
       },
     });
     return response.data;
   } catch (error: any) {
     console.error("Error uploading SRS document:", error);
+    console.error("Error response:", error.response);
+    console.error("Error status:", error.response?.status);
+    console.error("Error data:", error.response?.data);
+    
+    if (error.response?.status === 401) {
+      clearAuthData();
+      throw new Error("Authentication failed. Please login again.");
+    }
+    
+    // Hiển thị thông tin lỗi chi tiết từ backend
+    if (error.response?.data?.message) {
+      throw new Error(`Backend error: ${error.response.data.message}`);
+    }
+    
+    if (error.response?.data?.error) {
+      throw new Error(`Backend error: ${error.response.data.error}`);
+    }
+    
+    if (error.response?.status === 500) {
+      throw new Error(`Server error (500): ${error.response?.data?.message || 'Internal server error. Please check backend logs.'}`);
+    }
+    
+    throw new Error(error.message || "Failed to upload SRS document");
+  }
+};
+
+// Lấy thông tin user hiện tại từ API /me
+const getCurrentUser = async () => {
+  try {
+    const response = await axios.get(`${API_BASE_URL}/me`, {
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(),
+      },
+    });
+    return response.data;
+  } catch (error: any) {
+    console.error("Error getting current user:", error);
     
     if (error.response?.status === 401) {
       clearAuthData();
@@ -68,7 +130,7 @@ const uploadSrsDocument = async (formData: FormData) => {
       throw new Error(error.response.data.message);
     }
     
-    throw new Error(error.message || "Failed to upload SRS document");
+    throw new Error(error.message || "Failed to get current user");
   }
 };
 
@@ -101,5 +163,6 @@ const deleteSrsDocument = async (srsId: number) => {
 export { 
   getSrsDocument, 
   uploadSrsDocument, 
-  deleteSrsDocument 
+  deleteSrsDocument,
+  getCurrentUser
 };
