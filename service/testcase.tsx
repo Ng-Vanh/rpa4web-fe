@@ -33,17 +33,31 @@ const getTestCaseById = async (id: number) => {
     }
 }
 const createTestCase = async (data: any) => {
+    // Chỉ gửi các field mà BE cần
+    const payload = {
+        scenarioId: data.scenarioId,
+        testItem: data.testItem,
+        testClassification: data.testClassification,
+        runConfig: data.runConfig
+        // Bỏ configDetails
+    };
+    
+    console.log('Sending simplified payload:', payload);
+    
     try {
-        const response = await axios.post(`${API_BASE_URL}/test-cases`, data, {
+        const response = await axios.post(`${API_BASE_URL}/test-cases`, payload, {
             headers: {
                 'Content-Type': 'application/json',
                 ...getAuthHeaders(),
             },
         });
-        console.log('Created test case:', response.data);
         return response.data;
     } catch (error) {
-        console.error("Error creating test case:", error);
+        if (axios.isAxiosError(error)) {
+            console.error("Error creating test case:", error.response?.data);
+        } else {
+            console.error("Error creating test case:", error);
+        }
         throw error;
     }
 }
