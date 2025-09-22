@@ -228,11 +228,57 @@ const uploadStepImage = async (file: File): Promise<string> => {
     }
 }
 
+const executeStep = async (stepId: number) => {
+    try {
+        if (!stepId || stepId <= 0) {
+            throw new Error('Invalid step ID');
+        }
+        const response = await axios.post(`${API_BASE_URL}/test-execution-steps/${stepId}/execute`, {}, {
+            headers: {
+                ...getAuthHeaders(),
+            },
+        });
+
+        console.log('Executed test case step:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error executing test case step:", error);
+        if (axios.isAxiosError(error)) {
+            console.error('Execution error response:', error.response?.data);
+        }
+        throw error;
+    }
+}
+const getExecutionSteps = async (executionId: number) => {
+    try {
+        if (!executionId || executionId <= 0) {
+            throw new Error('Invalid execution ID');
+        }
+
+        const response = await axios.get(`${API_BASE_URL}/test-execution-steps/${executionId}`, {
+            headers: {
+                ...getAuthHeaders(),
+            },
+        });
+
+        console.log('Fetched execution steps:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching execution steps:", error);
+        if (axios.isAxiosError(error)) {
+            console.error('Fetch error response:', error.response?.data);
+        }
+        throw error;
+    }
+}
+
 export { 
     getAllTestCaseSteps, 
     createNewTestCaseStep, 
     updateTestCaseStep, 
     deleteTestCaseStep,
     uploadStepImage,
-    validateImageFile 
+    validateImageFile,
+    executeStep,
+    getExecutionSteps
 };

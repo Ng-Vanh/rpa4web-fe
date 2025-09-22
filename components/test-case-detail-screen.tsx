@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -24,15 +25,14 @@ import {
 import { mockExpectedResults, mockExecutionSteps, mockVerifications } from "@/lib/mock-data"
 import { StepEditModal } from "@/components/step-edit-modal"
 import { getTestCaseById } from "@/service/testcase"
-import { 
-  getAllTestCaseSteps, 
+import {     getAllTestCaseSteps, 
   createNewTestCaseStep, 
   updateTestCaseStep, 
   deleteTestCaseStep,
   uploadStepImage,
-  validateImageFile 
-} from "@/service/testcase-step"
-import { findElementByText, findElementByImage } from "@/service/find-element";
+  validateImageFile  } from "@/service/testcase-step"
+import { generateTestScript } from "@/service/gen-script" 
+import { executeStep, getExecutionSteps } from "@/service/testcase-step" 
 
 interface TestCaseDetailScreenProps {
   onBack: () => void
@@ -50,6 +50,16 @@ interface TestCaseStep {
   scriptCode?: string
   imgUrl?: string
   expectedPageUrl?: string
+}
+
+// Add interface for execution step
+interface TestExecutionStep {
+  id: number
+  stepId: number
+  screenshotUrl?: string
+  executionResult?: string
+  status?: string
+  executedAt?: string
 }
 
 interface TestCaseDetail {
@@ -77,22 +87,20 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
   const [stepColumnWidth, setStepColumnWidth] = useState(425)
   const [isResizing, setIsResizing] = useState(false)
   
+  // Add script generation loading state
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false)
+  
+  // Add step execution states
+  const [executingSteps, setExecutingSteps] = useState<Set<number>>(new Set())
+  
+  // Add execution steps state to track screenshots separately
+  const [executionSteps, setExecutionSteps] = useState<{ [stepId: number]: TestExecutionStep }>({})
+  
   // API data states
   const [testCase, setTestCase] = useState<TestCaseDetail>(initialTestCase)
   const [steps, setSteps] = useState<TestCaseStep[]>([])
   const [loading, setLoading] = useState(true)
   const [stepsLoading, setStepsLoading] = useState(false)
-
-  // State để quản lý lựa chọn radio button (Text hoặc Image) cho mỗi step
-  const [stepInputType, setStepInputType] = useState<{ [key: number]: "text" | "image" }>({})
-  // State để lưu trữ giá trị text input cho mỗi step khi chọn Text
-  const [stepTextInput, setStepTextInput] = useState<{ [key: number]: string }>({})
-  // State để lưu trữ kết quả XPath cho mỗi step
-  const [stepXPathResult, setStepXPathResult] = useState<{ [key: number]: string }>({})
-  // State để quản lý trạng thái loading của nút Detect cho mỗi step
-  const [stepDetectLoading, setStepDetectLoading] = useState<{ [key: number]: boolean }>({})
-  // State để quản lý trạng thái nút Copy
-  const [copyStatus, setCopyStatus] = useState<{ [key: number]: boolean }>({})
 
   const [editFormData, setEditFormData] = useState({
     test_item: initialTestCase.testItem || initialTestCase.test_item || "",
@@ -104,9 +112,9 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
   const [editSteps, setEditSteps] = useState<TestCaseStep[]>([])
 
   // Keep mock data for features not yet implemented via API
-  const expectedOutput = mockExpectedResults.filter((er) => er.test_case_id === testCase.id)
-  const executionSteps = mockExecutionSteps
-  const verifications = mockVerifications
+  // const expectedOutput = mockExpectedResults.filter((er) => er.test_case_id === testCase.id)
+  // const executionSteps = mockExecutionSteps
+  // const verifications = mockVerifications
 
   // Fetch detailed test case data when component mounts
   useEffect(() => {
@@ -137,32 +145,43 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
 
   // Fetch test case steps
   useEffect(() => {
-    const fetchTestCaseSteps = async () => {
-      try {
-        setStepsLoading(true)
-        const response = await getAllTestCaseSteps(testCase.id)
-        const fetchedSteps = response.data || response
-        
-        // Transform steps to match expected format with additional UI fields
-        const transformedSteps = fetchedSteps.map((step: TestCaseStep) => ({
-          ...step,
-          stepImage: null as File | null,
-          imgUrl: step.imgUrl || `/placeholder.svg?height=200&width=300&query=step-${step.stepOrder}-screenshot`,
-        }))
-        
-        setSteps(transformedSteps)
-        setEditSteps(transformedSteps)
-      } catch (error) {
-        console.error("Failed to fetch test case steps:", error)
-        setSteps([])
-        setEditSteps([])
-      } finally {
-        setStepsLoading(false)
-      }
-    }
-
     fetchTestCaseSteps()
   }, [testCase.id])
+
+  // Extract fetchTestCaseSteps as a separate function for reusability
+  const fetchTestCaseSteps = async () => {
+    try {
+      setStepsLoading(true)
+      const response = await getAllTestCaseSteps(testCase.id)
+      const fetchedSteps = response.data || response
+      
+      // Transform steps to match expected format with additional UI fields
+      const transformedSteps = fetchedSteps.map((step: TestCaseStep) => ({
+        ...step,
+        stepImage: null as File | null,
+        imgUrl: step.imgUrl || `/placeholder.svg?height=200&width=300&query=step-${step.stepOrder}-screenshot`,
+      }))
+      
+      setSteps(transformedSteps)
+      setEditSteps(transformedSteps)
+    } catch (error) {
+      console.error("Failed to fetch test case steps:", error)
+      setSteps([])
+      setEditSteps([])
+    } finally {
+      setStepsLoading(false)
+    }
+  }
+
+  // Helper function to get the display image URL for a step
+  const getStepDisplayImage = (step: TestCaseStep) => {
+    // In execution view, prioritize execution screenshot if available
+    if (viewMode === "execution" && executionSteps[step.id]?.screenshotUrl) {
+      return executionSteps[step.id].screenshotUrl
+    }
+    // Otherwise use the original step image
+    return step.imgUrl || `/placeholder.svg?height=200&width=300&query=step-${step.stepOrder}-screenshot`
+  }
 
   const hasBeenGenerated = steps.length > 0 && steps.some((step) => step.scriptCode)
 
@@ -170,123 +189,123 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
     setIsEditing(true)
   }
 
-  const handleStepModalSave = async (updatedStep: any) => {
-    try {
-      const isNewStep = !steps.find((step) => step.id === updatedStep.id && step.id > 0)
+const handleStepModalSave = async (updatedStep: any) => {
+  try {
+      const isNewStep = !steps.find((step) => step.id === updatedStep.id && step.id > 0);
       
       if (isNewStep) {
-        // Adding new step - call create API
-        console.log("Creating new step:", updatedStep)
-        
-        // Prepare data for API call with consistent field names
-        const stepData = {
-          testCaseId: updatedStep.testCaseId,
-          stepOrder: updatedStep.stepOrder,
-          actionDescription: updatedStep.actionDescription,
-          inputData: updatedStep.inputData || "",
-          expectedOutput: updatedStep.expectedOutput || "", // Consistent field name
-          scriptCode: updatedStep.scriptCode || "",
-          stepImage: updatedStep.stepImage instanceof File ? updatedStep.stepImage : null
-        }
-        
-        // Call API to create the step
-        const createdStep = await createNewTestCaseStep(stepData)
-        
-        // Update the step with the real data from API response
-        const stepWithRealId = {
-          ...updatedStep,
-          id: createdStep.id,
-          testCaseId: createdStep.testCaseId || stepData.testCaseId,
-          stepOrder: createdStep.stepOrder || stepData.stepOrder,
-          actionDescription: createdStep.actionDescription || stepData.actionDescription,
-          inputData: createdStep.inputData || stepData.inputData,
-          expectedOutput: createdStep.expectedOutput || stepData.expectedOutput,
-          scriptCode: createdStep.scriptCode || stepData.scriptCode,
-          imgUrl: createdStep.imgUrl || updatedStep.imgUrl, // Use API response or keep existing
-          stepImage: null // Clear the file object after successful upload
-        }
-        
-        setEditSteps((prev) => [...prev, stepWithRealId])
-        setSteps((prev) => [...prev, stepWithRealId])
-        console.log("Successfully created new step:", stepWithRealId)
-        
+          // Adding new step - call create API
+          console.log("Creating new step:", updatedStep);
+          
+          // Prepare data for API call with consistent field names
+          const stepData = {
+              testCaseId: updatedStep.testCaseId,
+              stepOrder: updatedStep.stepOrder,
+              actionDescription: updatedStep.actionDescription,
+              inputData: updatedStep.inputData || "",
+              expectedOutput: updatedStep.expectedOutput || "", // Consistent field name
+              scriptCode: updatedStep.scriptCode || "",
+              stepImage: updatedStep.stepImage instanceof File ? updatedStep.stepImage : null
+          };
+          
+          // Call API to create the step
+          const createdStep = await createNewTestCaseStep(stepData);
+          
+          // Update the step with the real data from API response
+          const stepWithRealId = {
+              ...updatedStep,
+              id: createdStep.id,
+              testCaseId: createdStep.testCaseId || stepData.testCaseId,
+              stepOrder: createdStep.stepOrder || stepData.stepOrder,
+              actionDescription: createdStep.actionDescription || stepData.actionDescription,
+              inputData: createdStep.inputData || stepData.inputData,
+              expectedOutput: createdStep.expectedOutput || stepData.expectedOutput,
+              scriptCode: createdStep.scriptCode || stepData.scriptCode,
+              imgUrl: createdStep.imgUrl || updatedStep.imgUrl, // Use API response or keep existing
+              stepImage: null // Clear the file object after successful upload
+          };
+          
+          setEditSteps((prev) => [...prev, stepWithRealId]);
+          setSteps((prev) => [...prev, stepWithRealId]);
+          console.log("Successfully created new step:", stepWithRealId);
+          
       } else {
-        // Editing existing step - call update API
-        console.log("Updating existing step:", updatedStep.id)
-        
-        // Prepare data for update - only include changed fields
-        const updateData: any = {}
-        
-        const originalStep = steps.find(s => s.id === updatedStep.id)
-        if (originalStep) {
-          if (updatedStep.stepOrder !== originalStep.stepOrder) {
-            updateData.stepOrder = updatedStep.stepOrder
+          // Editing existing step - call update API
+          console.log("Updating existing step:", updatedStep.id);
+          
+          // Prepare data for update - only include changed fields
+          const updateData: any = {};
+          
+          const originalStep = steps.find(s => s.id === updatedStep.id);
+          if (originalStep) {
+              if (updatedStep.stepOrder !== originalStep.stepOrder) {
+                  updateData.stepOrder = updatedStep.stepOrder;
+              }
+              if (updatedStep.actionDescription !== originalStep.actionDescription) {
+                  updateData.actionDescription = updatedStep.actionDescription;
+              }
+              if (updatedStep.inputData !== originalStep.inputData) {
+                  updateData.inputData = updatedStep.inputData || "";
+              }
+              if (updatedStep.expectedOutput !== originalStep.expectedOutput) {
+                  updateData.expectedOutput = updatedStep.expectedOutput || "";
+              }
+              if (updatedStep.scriptCode !== originalStep.scriptCode) {
+                  updateData.scriptCode = updatedStep.scriptCode || "";
+              }
+              if (updatedStep.stepImage instanceof File) {
+                  updateData.stepImage = updatedStep.stepImage;
+              }
+          } else {
+              // If we can't find the original step, send all data
+              updateData.stepOrder = updatedStep.stepOrder;
+              updateData.actionDescription = updatedStep.actionDescription;
+              updateData.inputData = updatedStep.inputData || "";
+              updateData.expectedOutput = updatedStep.expectedOutput || "";
+              updateData.scriptCode = updatedStep.scriptCode || "";
+              if (updatedStep.stepImage instanceof File) {
+                  updateData.stepImage = updatedStep.stepImage;
+              }
           }
-          if (updatedStep.actionDescription !== originalStep.actionDescription) {
-            updateData.actionDescription = updatedStep.actionDescription
-          }
-          if (updatedStep.inputData !== originalStep.inputData) {
-            updateData.inputData = updatedStep.inputData || ""
-          }
-          if (updatedStep.expectedOutput !== originalStep.expectedOutput) {
-            updateData.expectedOutput = updatedStep.expectedOutput || ""
-          }
-          if (updatedStep.scriptCode !== originalStep.scriptCode) {
-            updateData.scriptCode = updatedStep.scriptCode || ""
-          }
-          if (updatedStep.stepImage instanceof File) {
-            updateData.stepImage = updatedStep.stepImage
-          }
-        } else {
-          // If we can't find the original step, send all data
-          updateData.stepOrder = updatedStep.stepOrder
-          updateData.actionDescription = updatedStep.actionDescription
-          updateData.inputData = updatedStep.inputData || ""
-          updateData.expectedOutput = updatedStep.expectedOutput || ""
-          updateData.scriptCode = updatedStep.scriptCode || ""
-          if (updatedStep.stepImage instanceof File) {
-            updateData.stepImage = updatedStep.stepImage
-          }
-        }
-        
-        // Call API to update the step
-        const apiResponse = await updateTestCaseStep(updatedStep.id, updateData)
-        
-        // Merge API response with updated step
-        const updatedStepWithApiData = {
-          ...updatedStep,
-          ...apiResponse,
-          imgUrl: apiResponse.imgUrl || updatedStep.imgUrl,
-          stepImage: null // Clear the file object after successful upload
-        }
-        
-        setEditSteps((prev) => prev.map((step) => 
-          step.id === updatedStep.id ? updatedStepWithApiData : step
-        ))
-        setSteps((prev) => prev.map((step) => 
-          step.id === updatedStep.id ? updatedStepWithApiData : step
-        ))
-        console.log("Successfully updated step:", updatedStepWithApiData)
+          
+          // Call API to update the step
+          const apiResponse = await updateTestCaseStep(updatedStep.id, updateData);
+          
+          // Merge API response with updated step
+          const updatedStepWithApiData = {
+              ...updatedStep,
+              ...apiResponse,
+              imgUrl: apiResponse.imgUrl || updatedStep.imgUrl,
+              stepImage: null // Clear the file object after successful upload
+          };
+          
+          setEditSteps((prev) => prev.map((step) => 
+              step.id === updatedStep.id ? updatedStepWithApiData : step
+          ));
+          setSteps((prev) => prev.map((step) => 
+              step.id === updatedStep.id ? updatedStepWithApiData : step
+          ));
+          console.log("Successfully updated step:", updatedStepWithApiData);
       }
       
-      setIsStepModalOpen(false)
-      setEditingStep(null)
+      setIsStepModalOpen(false);
+      setEditingStep(null);
       
-    } catch (error) {
-      console.error("Error saving step:", error)
+  } catch (error) {
+      console.error("Error saving step:", error);
       
       // Provide user-friendly error message
-      let errorMessage = "Error saving step. Please try again."
+      let errorMessage = "Error saving step. Please try again.";
       if (error instanceof Error) {
-        errorMessage = error.message
+          errorMessage = error.message;
       }
       
       // You might want to use a proper toast notification here
-      alert(errorMessage)
+      alert(errorMessage);
       
       // Keep modal open so user can try again
-    }
   }
+};
 
   const handleSave = async () => {
     try {
@@ -413,8 +432,136 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
     })
   }
 
-  const handleGenerateScript = () => {
-    setViewMode("execution")
+  // Updated handleGenerateScript function with API integration
+  const handleGenerateScript = async () => {
+    try {
+      setIsGeneratingScript(true)
+      console.log("Generating test script for test case:", testCase.id)
+      
+      // Call the API to generate test script
+      const script = await generateTestScript(testCase.id)
+      console.log("Generated script:", script)
+      
+      // After generation, refresh the steps to get the updated scriptCode
+      await fetchTestCaseSteps()
+      
+      // Switch to execution view to show the generated scripts
+      setViewMode("execution")
+      
+      // Show success message (you might want to use a proper toast notification)
+      // alert("Test script generated successfully!")
+      
+    } catch (error) {
+      console.error("Failed to generate test script:", error)
+      
+      // Show error message
+      let errorMessage = "Failed to generate test script. Please try again."
+      if (error instanceof Error) {
+        errorMessage = error.message
+      }
+      alert(errorMessage)
+    } finally {
+      setIsGeneratingScript(false)
+    }
+  }
+
+  // Updated step execution handler - now properly handles execution screenshots
+  const handleExecuteStep = async (stepId: number) => {
+    try {
+      // Add step to executing set
+      setExecutingSteps(prev => new Set([...prev, stepId]))
+      console.log("Executing step:", stepId)
+      
+      // Call the API to execute the step
+      const result = await executeStep(stepId)
+      console.log("Step execution result:", result)
+      
+      // Backend trả về: { message: "...", executionStepId: 123 }
+      if (result && result.executionStepId) {
+        try {
+          console.log("Fetching execution details for execution ID:", result.executionStepId)
+          
+          // Gọi API để lấy thông tin chi tiết execution step với screenshot
+          const executionDetails = await getExecutionSteps(result.executionStepId)
+          console.log("Execution details:", executionDetails)
+          
+          // Cập nhật execution steps state với screenshot từ execution details
+          if (executionDetails) {
+            const executionData = {
+              id: result.executionStepId,
+              stepId: stepId,
+              screenshotUrl: executionDetails.screenshotUrl || executionDetails.screenshot_url || null,
+              executionResult: executionDetails.executionResult || executionDetails.execution_result || null,
+              status: executionDetails.status || 'completed',
+              executedAt: executionDetails.executedAt || executionDetails.executed_at || new Date().toISOString()
+            }
+            
+            setExecutionSteps(prev => ({
+              ...prev,
+              [stepId]: executionData
+            }))
+            
+            console.log("Updated execution data for step:", stepId, executionData)
+          }
+        } catch (fetchError) {
+          console.error("Failed to fetch execution details:", fetchError)
+          // Nếu không lấy được execution details, vẫn lưu basic info
+          setExecutionSteps(prev => ({
+                      ...prev,
+                      [stepId]: {
+                        id: result.executionStepId,
+                        stepId: stepId,
+                        screenshotUrl: undefined,
+                        executionResult: undefined,
+                        status: 'completed',
+                        executedAt: new Date().toISOString()
+                      }
+                    }))
+        }
+      } else {
+        console.warn("No executionStepId returned from execute API")
+      }
+      
+      // If currently selected step is the executed step, refresh the view
+      if (selectedStep?.id === stepId) {
+        setSelectedStep({ ...selectedStep })
+      }
+      
+      console.log(`Step ${stepId} executed successfully!`)
+      
+    } catch (error) {
+      console.error("Failed to execute step:", error)
+      
+      // Show error message with more details
+      let errorMessage = "Failed to execute step. Please try again."
+      if (error instanceof Error) {
+        errorMessage = error.message
+      }
+      if (error && typeof error === 'object' && 'response' in error) {
+        if (
+          error &&
+          typeof error === "object" &&
+          "response" in error &&
+          error.response &&
+          typeof error.response === "object" &&
+          "data" in error.response
+        ) {
+          // Now it's safe to access error.response.data
+          // @ts-ignore
+          console.error("API Error Response:", error.response.data)
+          // @ts-ignore
+          errorMessage += ` (${error.response.status}: ${error.response.statusText})`
+        }
+      }
+      alert(errorMessage)
+    } finally {
+      // Remove step from executing set
+      setExecutingSteps(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(stepId)
+        return newSet
+      })
+    }
   }
 
   const handleCheckStepScore = (stepId: number) => {
@@ -434,6 +581,11 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
 
   const getStepVerification = (stepId: number) => {
     return verificationResults?.stepResults.find((r: any) => r.stepId === stepId)
+  }
+
+  // Helper function to check if step has been executed (has execution result)
+  const isStepExecutionCompleted = (stepId: number) => {
+    return executionSteps[stepId] && executionSteps[stepId].screenshotUrl
   }
 
   if (loading) {
@@ -663,11 +815,12 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
 
               <Button
                 onClick={handleGenerateScript}
-                className="w-full bg-green-600 hover:bg-green-700 text-white"
+                disabled={isGeneratingScript || steps.length === 0}
+                className="w-full bg-green-600 hover:bg-green-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed"
                 size="lg"
               >
                 <Play className="h-4 w-4 mr-2" />
-                {hasBeenGenerated ? "Regenerate Test Script" : "Generate Test Script"}
+                {isGeneratingScript ? "Generating..." : hasBeenGenerated ? "Regenerate Test Script" : "Generate Test Script"}
               </Button>
             </div>
 
@@ -680,7 +833,9 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
               </p>
               <p>
                 <strong>Generate:</strong>{" "}
-                {hasBeenGenerated
+                {isGeneratingScript 
+                  ? "Generating executable test scripts..." 
+                  : hasBeenGenerated
                   ? "Regenerate executable test scripts with latest changes"
                   : "Generate executable test scripts from this test case"}
               </p>
@@ -739,9 +894,10 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
             <div className="p-4 space-y-3">
               {steps.map((step, index) => {
                 const verification = getStepVerification(step.id)
-                const expectedResult = expectedOutput.find((er) => er.step_id === step.id)
                 const stepScore = stepScoreResults[step.id]
                 const executed = isStepExecuted(step)
+                const executionCompleted = isStepExecutionCompleted(step.id)
+                const isExecuting = executingSteps.has(step.id)
 
                 return (
                   <Card
@@ -769,37 +925,29 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                           </Button>
                         </div>
                         <div className="flex items-center gap-2">
-                          {step.imgUrl && (
+                          {/* Show execution screenshot thumbnail if available, otherwise original step image */}
+                          {getStepDisplayImage(step) && (
                             <div className="w-12 h-8 bg-muted rounded overflow-hidden">
                               <img
-                                src={step.imgUrl}
-                                alt={`Step ${step.stepOrder} thumbnail`}
+                                src={step.imgUrl || "/placeholder.svg"}
+                                alt={`Step ${step.stepOrder} ${executionCompleted ? 'execution' : 'design'} thumbnail`}
                                 className="w-full h-full object-cover"
                               />
                             </div>
                           )}
-                          {!step.imgUrl && (
-                            <label className="cursor-pointer">
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="hidden"
-                                onChange={(e) => {
-                                  const file = e.target.files?.[0]
-                                  if (file) {
-                                    // Handle image upload for step
-                                    console.log(`Uploading image for step ${step.id}`)
-                                  }
-                                }}
-                              />
-                              <div className="w-12 h-8 bg-muted rounded flex items-center justify-center hover:bg-muted/80 transition-colors">
-                                <Upload className="h-4 w-4 text-muted-foreground" />
-                              </div>
-                            </label>
+                          {!getStepDisplayImage(step) && (
+                            <div className="w-12 h-8 bg-muted rounded flex items-center justify-center">
+                              <Upload className="h-4 w-4 text-muted-foreground" />
+                            </div>
                           )}
                           {stepScore && (
                             <Badge variant={stepScore.status === "Matched" ? "default" : "secondary"} className="text-xs">
                               {stepScore.score === 1 ? "✓" : "~"} {Math.round(stepScore.score * 100)}%
+                            </Badge>
+                          )}
+                          {executionCompleted && (
+                            <Badge variant="outline" className="text-xs bg-green-50 text-green-700">
+                              Executed
                             </Badge>
                           )}
                         </div>
@@ -811,143 +959,6 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                           <p className="text-sm font-medium mb-1">{step.actionDescription}</p>
                           {step.inputData && (
                             <p className="text-xs text-muted-foreground mb-2">Input: {step.inputData}</p>
-                          )}
-                          {/* Thêm giao diện mới cho radio buttons, input text, và thông báo image */}
-                          <div className="mt-2 flex items-center gap-2">
-                            <span className="text-sm font-medium">Target Element:</span>
-                            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <input
-                                type="radio"
-                                name={`input-type-${step.id}`}
-                                value="text"
-                                checked={stepInputType[step.id] === "text" || !stepInputType[step.id]}
-                                onChange={() => setStepInputType((prev) => ({ ...prev, [step.id]: "text" }))}
-                              />
-                              Text
-                            </label>
-                            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                              <input
-                                type="radio"
-                                name={`input-type-${step.id}`}
-                                value="image"
-                                checked={stepInputType[step.id] === "image"}
-                                onChange={() => setStepInputType((prev) => ({ ...prev, [step.id]: "image" }))}
-                              />
-                              Image
-                            </label>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="text-xs h-6 px-2"
-                              disabled={stepDetectLoading[step.id]}
-                              onClick={async () => {
-                                const inputType = stepInputType[step.id] || "text";
-                                if (inputType === "text") {
-                                  const text = stepTextInput[step.id] || "";
-                                  if (!text) {
-                                    setStepXPathResult((prev) => ({ ...prev, [step.id]: "Please enter text." }));
-                                    return;
-                                  }
-                                  try {
-                                    // Set loading state for the Detect button
-                                    setStepDetectLoading((prev) => ({ ...prev, [step.id]: true }));
-                                    const xpath = await findElementByText(text);
-                                    // Display XPath result below input
-                                    setStepXPathResult((prev) => ({ ...prev, [step.id]: `XPath: ${xpath}` }));
-                                  } catch (error: any) {
-                                    setStepXPathResult((prev) => ({ ...prev, [step.id]: error.message || "Error detecting element." }));
-                                  } finally {
-                                    // Clear loading state
-                                    setStepDetectLoading((prev) => ({ ...prev, [step.id]: false }));
-                                  }
-                                } else {
-                                  // Xử lý cho image
-                                  if (!step.imgUrl) {
-                                    setStepXPathResult((prev) => ({ ...prev, [step.id]: "No image uploaded. Please upload an image." }));
-                                    return;
-                                  }
-                                  try {
-                                    // Set loading state for the Detect button
-                                    setStepDetectLoading((prev) => ({ ...prev, [step.id]: true }));
-                                    const xpath = await findElementByImage(step.imgUrl);
-                                    // Display XPath result below input
-                                    setStepXPathResult((prev) => ({ ...prev, [step.id]: `XPath: ${xpath}` }));
-                                  } catch (error: any) {
-                                    setStepXPathResult((prev) => ({ ...prev, [step.id]: error.message || "Error detecting element by image." }));
-                                  } finally {
-                                    // Clear loading state
-                                    setStepDetectLoading((prev) => ({ ...prev, [step.id]: false }));
-                                  }
-                                }
-                              }}
-                            >
-                              {stepDetectLoading[step.id] ? "Loading..." : "Detect"}
-                            </Button>
-                          </div>
-                          {(stepInputType[step.id] === "text" || !stepInputType[step.id]) && (
-                            <>
-                              <Input
-                                value={stepTextInput[step.id] || ""}
-                                onChange={(e) =>
-                                  setStepTextInput((prev) => ({ ...prev, [step.id]: e.target.value }))
-                                }
-                                placeholder="Enter text here..."
-                                className="mt-2 text-xs h-6"
-                                style={{ fontSize: "14px" }} // Added font size for the input field
-                              />
-                              {stepXPathResult[step.id] && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <p className="text-xs text-muted-foreground">{stepXPathResult[step.id]}</p>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="text-xs h-6 px-2"
-                                    onClick={() => {
-                                      const xpath = stepXPathResult[step.id].replace("XPath: ", "");
-                                      navigator.clipboard.writeText(xpath);
-                                      setCopyStatus((prev) => ({ ...prev, [step.id]: true }));
-                                      setTimeout(() => {
-                                        setCopyStatus((prev) => ({ ...prev, [step.id]: false }));
-                                      }, 2000); // Reset sau 2 giây
-                                    }}
-                                  >
-                                    {copyStatus[step.id] ? "Copied!" : "Copy"}
-                                  </Button>
-                                </div>
-                              )}
-                            </>
-                          )}
-                          {stepInputType[step.id] === "image" && (
-                            <>
-                              {step.imgUrl ? (
-                                <>
-                                  {stepXPathResult[step.id] && (
-                                    <div className="flex items-center gap-2 mt-2">
-                                      <p className="text-xs text-muted-foreground">{stepXPathResult[step.id]}</p>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="text-xs h-6 px-2"
-                                        onClick={() => {
-                                          const xpath = stepXPathResult[step.id].replace("XPath: ", "");
-                                          navigator.clipboard.writeText(xpath);
-                                          setCopyStatus((prev) => ({ ...prev, [step.id]: true }));
-                                          setTimeout(() => {
-                                            setCopyStatus((prev) => ({ ...prev, [step.id]: false }));
-                                          }, 2000); // Reset sau 2 giây
-                                        }}
-                                      >
-                                        {copyStatus[step.id] ? "Copied!" : "Copy"}
-                                      </Button>
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <p className="text-red-500 text-xs mt-2">
-                                  No image uploaded. Please upload an image.
-                                </p>
-                              )}
-                            </>
                           )}
                         </div>
                       </div>
@@ -963,7 +974,8 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center text-xs text-muted-foreground">
                           <ImageIcon className="h-3 w-3 mr-1" />
-                          {step.imgUrl ? "Screenshot available" : "No screenshot"}
+                          {executionCompleted ? "Execution screenshot" : 
+                           step.imgUrl ? "Design screenshot" : "No screenshot"}
                         </div>
                         <div className="flex space-x-1">
                           <Button
@@ -971,13 +983,13 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                             size="sm"
                             onClick={(e) => {
                               e.stopPropagation()
-                              // Execute step logic here
-                              console.log(`Executing step ${step.id}`)
+                              handleExecuteStep(step.id)
                             }}
+                            disabled={isExecuting}
                             className="text-xs h-6 px-2"
                           >
                             <Play className="h-3 w-3 mr-1" />
-                            Execute
+                            {isExecuting ? "Executing..." : "Execute"}
                           </Button>
                           <Button
                             variant="outline"
@@ -986,7 +998,7 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                               e.stopPropagation()
                               handleCheckStepScore(step.id)
                             }}
-                            disabled={!executed || !!stepScore}
+                            disabled={!executionCompleted || !!stepScore}
                             className="text-xs h-6 px-2"
                           >
                             <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -1037,18 +1049,38 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                   <h2 className="text-xl font-semibold">
                     Step {selectedStep.stepOrder}: {selectedStep.actionDescription}
                   </h2>
+                  <div className="flex items-center gap-4 mt-1">
+                    <p className="text-muted-foreground">
+                      {isStepExecutionCompleted(selectedStep.id) ? "Execution Screenshot" : "Design Screenshot"}
+                    </p>
+                    {isStepExecutionCompleted(selectedStep.id) && executionSteps[selectedStep.id]?.executedAt && (
+                      <p className="text-xs text-muted-foreground">
+                        Executed: {new Date(executionSteps[selectedStep.id].executedAt ?? "").toLocaleString()}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <Badge variant="outline">Screenshot View</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge variant="outline">
+                    {isStepExecutionCompleted(selectedStep.id) ? "Execution View" : "Design View"}
+                  </Badge>
+                  {isStepExecutionCompleted(selectedStep.id) && (
+                    <Badge variant="outline" className="bg-green-50 text-green-700">
+                      Executed
+                    </Badge>
+                  )}
+                </div>
               </div>
               {selectedStep.scriptCode && (
                 <div className="mt-4 p-3 bg-muted/50 rounded-lg">
                   <div className="flex items-center mb-2">
                     <Code className="h-4 w-4 mr-2" />
-                    <span className="font-medium text-sm">Script Details: </span>
+                    <span className="font-medium text-sm">Script Details:</span>
                     <code className="text-xs bg-background p-2 rounded block whitespace-pre-wrap">
-                      {selectedStep.scriptCode}
-                    </code>
+                    {selectedStep.scriptCode}
+                  </code>
                   </div>
+                  
                 </div>
               )}
             </div>
@@ -1056,10 +1088,10 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
               <Card className="w-full max-w-4xl">
                 <CardContent className="p-6">
                   <div className="aspect-video bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg flex items-center justify-center">
-                    {selectedStep.imgUrl ? (
+                    {getStepDisplayImage(selectedStep) ? (
                       <img
-                        src={selectedStep.imgUrl}
-                        alt={`Step ${selectedStep.stepOrder} screenshot`}
+                        src={getStepDisplayImage(selectedStep)}
+                        alt={`Step ${selectedStep.stepOrder} ${isStepExecutionCompleted(selectedStep.id) ? 'execution' : 'design'} screenshot`}
                         className="w-full h-full object-contain rounded-lg"
                       />
                     ) : (
@@ -1108,9 +1140,13 @@ export function TestCaseDetailScreen({ onBack, testCase: initialTestCase, initia
                 <Play className="h-4 w-4 mr-2" />
                 Run Test
               </Button>
-              <Button variant="outline">
+              <Button 
+                variant="outline" 
+                onClick={handleGenerateScript}
+                disabled={isGeneratingScript}
+              >
                 <Code className="h-4 w-4 mr-2" />
-                Generate Test Script
+                {isGeneratingScript ? "Generating..." : "Generate Test Script"}
               </Button>
             </div>
           )}
