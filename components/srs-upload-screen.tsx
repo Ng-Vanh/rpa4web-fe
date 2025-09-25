@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ArrowLeft, Upload, Eye, ArrowRight } from "lucide-react"
 import { uploadSrsDocument } from "@/service/srs_document"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { getSrsPreview } from "@/service/srs_document"
 
 interface SRSUploadScreenProps {
   onBack: () => void
@@ -17,6 +18,7 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
   const [uploadStep, setUploadStep] = useState<"select" | "uploading" | "success">("select")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadedFileContent, setUploadedFileContent] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [uploadedSRS, setUploadedSRS] = useState<any>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
 
@@ -75,44 +77,7 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
       console.log('Upload response data:', (response as any)?.data)
       console.log('Upload response status:', (response as any)?.status)
 
-      // Tạo mock content để hiển thị preview (có thể thay bằng content thật từ API)
-      const mockPdfContent = `
-Software Requirements Specification
-${selectedFile.name}
-
-1. INTRODUCTION
-This document specifies the requirements for the ${selectedFile.name.replace(/\.[^/.]+$/, "")} system.
-
-2. FUNCTIONAL REQUIREMENTS
-2.1 User Authentication
-- The system shall provide user login functionality
-- The system shall validate user credentials
-- The system shall maintain user sessions
-
-2.2 Data Management
-- The system shall allow data input and validation
-- The system shall store data securely
-- The system shall provide data retrieval capabilities
-
-3. NON-FUNCTIONAL REQUIREMENTS
-3.1 Performance
-- The system shall respond within 2 seconds for standard operations
-- The system shall support up to 100 concurrent users
-
-3.2 Security
-- All data transmissions shall be encrypted
-- User passwords shall be hashed and salted
-- The system shall implement role-based access control
-
-4. USER INTERFACE REQUIREMENTS
-- The interface shall be responsive and mobile-friendly
-- The system shall provide clear error messages
-- Navigation shall be intuitive and consistent
-
-This is a simulated PDF content for demonstration purposes.
-      `.trim()
-
-      // Sử dụng dữ liệu từ API response hoặc tạo mock data
+      // Sử dụng dữ liệu từ API response
       const newSRS = (response as any)?.data || {
         id: Date.now(),
         name: selectedFile.name.replace(/\.[^/.]+$/, ""),
@@ -122,8 +87,17 @@ This is a simulated PDF content for demonstration purposes.
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       }
+      
+      // Gọi preview API để lấy PDF blob và tạo object URL
+      try {
+        const blob = await getSrsPreview(newSRS.id)
+        const url = URL.createObjectURL(blob)
+        setPreviewUrl(url)
+      } catch (e) {
+        console.warn('Load preview failed:', e)
+      }
 
-      setUploadedFileContent(mockPdfContent)
+      setUploadedFileContent(null)
       setUploadedSRS(newSRS)
       setUploadStep("success")
       
@@ -227,7 +201,7 @@ This is a simulated PDF content for demonstration purposes.
                   </p>
                 </div>
 
-                {uploadedFileContent && (
+                {(uploadedFileContent || previewUrl) && (
                   <Card className="mt-6">
                     <CardHeader>
                       <CardTitle className="flex items-center">
@@ -237,11 +211,19 @@ This is a simulated PDF content for demonstration purposes.
                       <CardDescription>Preview of the uploaded SRS document</CardDescription>
                     </CardHeader>
                     <CardContent>
-                      <div className="h-96 overflow-y-auto bg-muted/30 p-6 rounded-lg border w-full">
-                        <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
-                          {uploadedFileContent}
-                        </pre>
-                      </div>
+                      {previewUrl ? (
+                        <iframe
+                          src={previewUrl}
+                          className="w-full h-96 rounded-lg border"
+                          title="SRS Preview"
+                        />
+                      ) : (
+                        <div className="h-96 overflow-y-auto bg-muted/30 p-6 rounded-lg border w-full">
+                          <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
+                            {uploadedFileContent}
+                          </pre>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}

@@ -166,3 +166,27 @@ export {
   deleteSrsDocument,
   getCurrentUser
 };
+
+// Lấy preview PDF (byte stream) cho SRS
+export const getSrsPreview = async (srsId: number, rangeHeader?: string) => {
+  const baseAuth = getAuthHeaders();
+  const headers: Record<string, string> = {
+    Accept: 'application/pdf',
+  };
+  if (baseAuth && (baseAuth as any).Authorization) {
+    headers['Authorization'] = (baseAuth as any).Authorization as string;
+  }
+  if (rangeHeader) headers['Range'] = rangeHeader; // ví dụ: 'bytes=0-1048575'
+
+  const response = await axios.get(`${API_BASE_URL}/srs/${srsId}/preview`, {
+    headers,
+    responseType: 'blob', // nhận về blob (PDF)
+    validateStatus: () => true,
+  });
+
+  if (response.status === 200 || response.status === 206) {
+    return response.data as Blob; // PDF blob
+  }
+
+  throw new Error(typeof response.data === 'string' ? response.data : `HTTP ${response.status}`);
+};
