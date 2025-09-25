@@ -10,7 +10,7 @@ export async function getScenariosJSONByAbsPath(absPath: string) {
   const res = await fetch(API_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ abs_path: safePath }),
+    body: JSON.stringify({ abs_path: absPath }),
   });
 
   if (!res.ok) {
