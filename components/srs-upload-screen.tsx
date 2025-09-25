@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { ArrowLeft, Upload, Eye, ArrowRight } from "lucide-react"
@@ -77,20 +77,30 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
       console.log('Upload response data:', (response as any)?.data)
       console.log('Upload response status:', (response as any)?.status)
 
-      // Sử dụng dữ liệu từ API response
-      const newSRS = (response as any)?.data || {
-        id: Date.now(),
+      // Chuẩn hóa đối tượng trả về và ID SRS
+      const resp: any = response as any
+      const srsId: number | undefined =
+        resp?.document?.id ?? resp?.id ?? resp?.srsId ?? resp?.data?.id ?? resp?.data?.srsId
+      if (!srsId) {
+        throw new Error("Không lấy được SRS id từ phản hồi upload")
+      }
+
+      const backendDoc = resp?.document ?? (resp?.data?.document)
+      const newSRS = backendDoc || {
+        id: srsId,
         name: selectedFile.name.replace(/\.[^/.]+$/, ""),
         description: `SRS document for ${selectedFile.name.replace(/\.[^/.]+$/, "")} system`,
-        file_path: `/uploads/${selectedFile.name}`,
-        uploaded_by: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        filePath: resp?.filePath || `/uploads/${selectedFile.name}`,
+        uploadedBy: { id: 0, username: "" },
+        uploadedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       }
+      // đảm bảo có id đúng
+      newSRS.id = newSRS.id ?? srsId
       
       // Gọi preview API để lấy PDF blob và tạo object URL
       try {
-        const blob = await getSrsPreview(newSRS.id)
+        const blob = await getSrsPreview(srsId)
         const url = URL.createObjectURL(blob)
         setPreviewUrl(url)
       } catch (e) {
@@ -201,32 +211,28 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
                   </p>
                 </div>
 
-                {(uploadedFileContent || previewUrl) && (
-                  <Card className="mt-6">
-                    <CardHeader>
-                      <CardTitle className="flex items-center">
-                        <Eye className="h-5 w-5 mr-2" />
-                        Document Content Preview
-                      </CardTitle>
-                      <CardDescription>Preview of the uploaded SRS document</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      {previewUrl ? (
-                        <iframe
-                          src={previewUrl}
-                          className="w-full h-96 rounded-lg border"
-                          title="SRS Preview"
-                        />
-                      ) : (
-                        <div className="h-96 overflow-y-auto bg-muted/30 p-6 rounded-lg border w-full">
-                          <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
-                            {uploadedFileContent}
-                          </pre>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
+                <Card className="mt-6">
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <Eye className="h-5 w-5 mr-2" />
+                      Document Content Preview
+                    </CardTitle>
+                    <CardDescription>Preview of the uploaded SRS document</CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {previewUrl ? (
+                      <iframe
+                        src={previewUrl}
+                        className="w-full h-96 rounded-lg border"
+                        title="SRS Preview"
+                      />
+                    ) : (
+                      <div className="h-24 flex items-center justify-center text-sm text-muted-foreground border rounded-lg">
+                        Không tải được preview PDF. Kiểm tra API /srs/{"{id}"}/preview.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
                 <div className="flex justify-end mt-6">
                   <Button onClick={handleContinue} className="flex items-center">
