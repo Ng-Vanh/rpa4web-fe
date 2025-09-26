@@ -96,7 +96,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         <div className="mb-6">
           <Card>
             <CardHeader>
-              <CardTitle>Test Cases Summary</CardTitle>
+              <CardTitle>Summary</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
@@ -129,13 +129,21 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                         </h3>
                       </div>
                     </div>
-                    <Button
+                    {/* <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => toggleTestCase(testCase.S_id)}
                       className="text-gray-500 hover:text-gray-700"
                     >
                       {isExpanded ? "Collapse" : "Expand"}
+                    </Button> */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => toggleTestCase(testCase.S_id)}
+                      className="text-gray-500 hover:text-gray-700"
+                    >
+                      Gen TCs
                     </Button>
                   </div>
 

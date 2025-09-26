@@ -140,14 +140,14 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
       <div className="container mx-auto p-6 max-w-4xl">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
+            {/* <CardTitle className="flex items-center">
               <Upload className="h-5 w-5 mr-2" />
               Upload SRS Document
-            </CardTitle>
+            </CardTitle> */}
             <CardDescription>
               {uploadStep === "select" && "Select an SRS file to upload"}
               {uploadStep === "uploading" && "Uploading your SRS document..."}
-              {uploadStep === "success" && "Upload completed successfully!"}
+              {/* {uploadStep === "success" && "Upload completed successfully!"} */}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -206,9 +206,9 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
                     <Upload className="h-6 w-6 text-green-600" />
                   </div>
                   <h3 className="text-lg font-semibold mb-2">Upload Successful!</h3>
-                  <p className="text-sm text-muted-foreground">
+                  {/* <p className="text-sm text-muted-foreground">
                     Your SRS document has been uploaded and processed successfully.
-                  </p>
+                  </p> */}
                 </div>
 
                 <Card className="mt-6">

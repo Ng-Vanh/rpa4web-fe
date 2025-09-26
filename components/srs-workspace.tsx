@@ -80,23 +80,29 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       return
     }
 
-    // Chưa có DB: mở viewer ngay và đồng thời lưu vào DB ở background
+    // Chưa có DB: mở viewer ngay và đồng thời lưu vào DB ở background (tuần tự để giữ thứ tự)
     setCurrentView("test-cases")
     try {
       const cases = (generatedData?.test_cases ?? generatedData?.testCases) || []
       if (Array.isArray(cases) && cases.length > 0 && srs?.id) {
-        const tasks = cases.map((tc: any) => {
-          const title = tc?.["Test Objective"] ?? ""
-          const description = tc
-          const webUrl = ""
-          return createScenario({ srsId: srs.id, title, description, webUrl })
-        })
-        Promise.allSettled(tasks).then((results) => {
-          const failed = results.filter(r => r.status === "rejected").length
-          if (failed > 0) {
-            console.warn(`[SRSWorkspace] Persist scenarios: ${failed} failed / ${results.length}`)
+        ;(async () => {
+          let failed = 0
+          for (let i = 0; i < cases.length; i++) {
+            const tc = cases[i]
+            try {
+              const title = tc?.["Test Objective"] ?? ""
+              const description = tc
+              const webUrl = ""
+              await createScenario({ srsId: srs.id, title, description, webUrl })
+            } catch (e) {
+              failed++
+              console.warn(`[SRSWorkspace] Persist scenario index ${i} failed`, e)
+            }
           }
-        }).catch((e) => {
+          if (failed > 0) {
+            console.warn(`[SRSWorkspace] Persist scenarios: ${failed} failed / ${cases.length}`)
+          }
+        })().catch((e) => {
           console.warn("[SRSWorkspace] Persist scenarios unexpected error", e)
         })
       }
