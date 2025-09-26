@@ -25,6 +25,7 @@ interface TestCasesViewerProps {
 
 export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   const [showTestData, setShowTestData] = useState(false)
+  const [isGeneratingAll, setIsGeneratingAll] = useState(false)
   const [expandedCases, setExpandedCases] = useState<Set<string>>(new Set())
 
   const toggleTestCase = (sId: string) => {
@@ -54,7 +55,17 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   }
 
   const toggleAllTestData = () => {
-    setShowTestData(!showTestData)
+    // Nếu đang hiển thị rồi thì ẩn ngay lập tức
+    if (showTestData) {
+      setShowTestData(false)
+      return
+    }
+    // Chưa hiển thị: mô phỏng generate 4 giây rồi mới hiện
+    setIsGeneratingAll(true)
+    setTimeout(() => {
+      setShowTestData(true)
+      setIsGeneratingAll(false)
+    }, 4000)
   }
 
   const testCases = data.test_cases || []
@@ -75,10 +86,22 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
               variant="outline"
               size="sm"
               onClick={toggleAllTestData}
+              disabled={isGeneratingAll}
               className={showTestData ? "bg-blue-50 border-blue-200" : ""}
             >
-              {showTestData ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-              {showTestData ? "Hide Test Data" : "Generate All TCs"}
+              {showTestData ? (
+                <>
+                  <EyeOff className="h-4 w-4 mr-2" />
+                  Hide Test Data
+                </>
+              ) : isGeneratingAll ? (
+                <>Generating...</>
+              ) : (
+                <>
+                  <Eye className="h-4 w-4 mr-2" />
+                  Generate All TCs
+                </>
+              )}
             </Button>
             <Button variant="outline" size="sm" onClick={copyToClipboard}>
               <Copy className="h-4 w-4 mr-2" />
@@ -161,11 +184,16 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       <span className="font-semibold text-gray-700 min-w-[100px]">Steps:</span>
                       <div className="flex-1">
                         <ol className="list-decimal list-inside space-y-1">
-                          {testCase.Steps.map((step, stepIndex) => (
-                            <li key={stepIndex} className="text-gray-600">
-                              {step}
-                            </li>
-                          ))}
+                          {testCase.Steps.map((step, stepIndex) => {
+                            const raw = typeof step === 'string' ? step : String(step)
+                            // Loại bỏ số thứ tự có sẵn ở đầu chuỗi (vd: "1. ", "2) ")
+                            const cleaned = raw.replace(/^\s*\d+[\.)]\s*/, '')
+                            return (
+                              <li key={stepIndex} className="text-gray-600">
+                                {cleaned}
+                              </li>
+                            )
+                          })}
                         </ol>
                       </div>
                     </div>
