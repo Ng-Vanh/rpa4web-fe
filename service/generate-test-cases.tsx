@@ -23,17 +23,24 @@ export async function getScenariosJSONByAbsPath(absPath: string) {
 }
 
 // Interface cho response từ API
-export interface GeneratedTestCasesResponse {
-  scenarios?: any[];
-  testCases?: any[];
+export interface GeneratedScenariosResponse {
+  scenarios?: {
+    UC_id: string;
+    S_id: string;
+    Title: string;
+    Precondition: string;
+    Steps: string[];
+    "Expected Result": string;
+    s_id: string;
+  }[];
   [key: string]: any; // Cho phép các field khác từ backend
 }
 
 // Helper function để validate response
-export function validateResponse(data: any): GeneratedTestCasesResponse {
+export function validateResponse(data: any): GeneratedScenariosResponse {
   if (!data || typeof data !== 'object') {
     throw new Error('Invalid response format from server');
   }
   
-  return data as GeneratedTestCasesResponse;
+  return data as GeneratedScenariosResponse;
 }

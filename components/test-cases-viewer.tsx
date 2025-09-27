@@ -6,19 +6,19 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { ArrowLeft, Play, Eye, EyeOff, Copy, Download } from "lucide-react"
 
-interface TestCase {
+interface Scenario {
+  UC_id: string
   S_id: string
-  "Test Objective": string
+  "Title": string
   Precondition: string
   Steps: string[]
-  "Test Data"?: string
-  Expected: string
+  "Expected Result": string
   s_id: string
 }
 
 interface TestCasesViewerProps {
   data: {
-    test_cases: TestCase[]
+    scenarios?: Scenario[]
   }
   onBack?: () => void
 }
@@ -68,7 +68,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }, 4000)
   }
 
-  const testCases = data.test_cases || []
+  const scenarios = data.scenarios || []
 
   return (
     <div className="min-h-screen bg-background">
@@ -80,7 +80,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
               Back
             </Button>
           )}
-          <h1 className="text-xl font-semibold">Generated Test Cases</h1>
+          <h1 className="text-xl font-semibold">Generated Scenarios</h1>
           <div className="ml-auto flex space-x-2">
             <Button
               variant="outline"
@@ -123,8 +123,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-2">
-                <Badge variant="secondary">Total Test Cases: {testCases.length}</Badge>
-                <Badge variant="outline">Scenarios: {new Set(testCases.map(tc => tc.s_id)).size}</Badge>
+                <Badge variant="secondary">Total Scenarios: {scenarios.length}</Badge>
+                <Badge variant="outline">Use Cases: {new Set(scenarios.map(s => s.UC_id)).size}</Badge>
                 <Badge variant="outline">
                   {showTestData ? "Test Data: Visible" : "Test Data: Hidden"}
                 </Badge>
@@ -134,21 +134,18 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         </div>
 
         <div className="space-y-6">
-          {testCases.map((testCase, index) => {
-            const isExpanded = expandedCases.has(testCase.S_id)
+          {scenarios.map((scenario, index) => {
+            const isExpanded = expandedCases.has(scenario.S_id)
             
             return (
-              <Card key={testCase.S_id} className="hover:shadow-md transition-shadow">
+              <Card key={scenario.S_id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-6">
-                  {/* Header với S_id và Test Objective */}
+                  {/* Header với S_id: Title (UC_id: "") */}
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-2">
-                        <Badge variant="default" className="text-sm font-mono">
-                          {testCase.s_id}
-                        </Badge>
                         <h3 className="text-lg font-semibold text-gray-900">
-                          {testCase["Test Objective"]}
+                          <span className="font-mono text-blue-600">{scenario.s_id}:</span> {scenario["Title"]} <span className="text-gray-500 text-sm">({scenario.UC_id})</span>
                         </h3>
                       </div>
                     </div>
@@ -163,7 +160,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => toggleTestCase(testCase.S_id)}
+                      onClick={() => toggleTestCase(scenario.S_id)}
                       className="text-gray-500 hover:text-gray-700"
                     >
                       Gen TCs
@@ -174,7 +171,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                   <div className="mb-4">
                     <div className="flex items-start space-x-2">
                       <span className="font-semibold text-gray-700 min-w-[100px]">Precondition:</span>
-                      <span className="text-gray-600">{testCase.Precondition}</span>
+                      <span className="text-gray-600">{scenario.Precondition}</span>
                     </div>
                   </div>
 
@@ -184,7 +181,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       <span className="font-semibold text-gray-700 min-w-[100px]">Steps:</span>
                       <div className="flex-1">
                         <ol className="list-decimal list-inside space-y-1">
-                          {testCase.Steps.map((step, stepIndex) => {
+                          {scenario.Steps.map((step, stepIndex) => {
                             const raw = typeof step === 'string' ? step : String(step)
                             // Loại bỏ số thứ tự có sẵn ở đầu chuỗi (vd: "1. ", "2) ")
                             const cleaned = raw.replace(/^\s*\d+[\.)]\s*/, '')
@@ -203,12 +200,12 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                   <div className="mb-4">
                     <div className="flex items-start space-x-2">
                       <span className="font-semibold text-gray-700 min-w-[100px]">Expected:</span>
-                      <span className="text-gray-600">{testCase.Expected}</span>
+                      <span className="text-gray-600">{scenario["Expected Result"]}</span>
                     </div>
                   </div>
 
-                  {/* Test Data - chỉ hiển thị khi showTestData = true */}
-                  {showTestData && testCase["Test Data"] && (
+                  {/* Test Data - chỉ hiển thị khi showTestData = true
+                  {showTestData && scenario["Test Data"] && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Test Data:</span>
@@ -221,10 +218,10 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                         </div>
                       </div>
                     </div>
-                  )}
+                  )} */}
 
                   {/* Divider */}
-                  {index < testCases.length - 1 && (
+                  {index < scenarios.length - 1 && (
                     <hr className="border-gray-200 mt-4" />
                   )}
                 </CardContent>
@@ -233,12 +230,12 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
           })}
         </div>
 
-        {testCases.length === 0 && (
+        {scenarios.length === 0 && (
           <Card>
             <CardContent className="p-12 text-center">
-              <h3 className="text-lg font-semibold mb-2">No Test Cases Found</h3>
+              <h3 className="text-lg font-semibold mb-2">No Scenarios Found</h3>
               <p className="text-muted-foreground">
-                No test cases were generated from the SRS document.
+                No scenarios were generated from the SRS document.
               </p>
             </CardContent>
           </Card>

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { ArrowLeft, FileText, Calendar, User, ExternalLink, Play, CheckCircle, History, Eye, Info, Edit3 } from "lucide-react"
 import { TestScenarioScreen } from "@/components/test-scenario-screen"
-import { getScenariosJSONByAbsPath, validateResponse } from "@/service/generate-test-cases"
+import { getScenariosJSONByAbsPath, validateResponse, GeneratedScenariosResponse } from "@/service/generate-test-cases"
 import { JSONViewer } from "@/components/json-viewer"
 import { TestCasesViewer } from "@/components/test-cases-viewer"
 import { createScenario, getScenariosBySrsId } from "@/service/scenario"
@@ -19,12 +19,12 @@ interface SRSWorkspaceProps {
 }
 
 export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
-  const [currentView, setCurrentView] = useState<"workspace" | "scenarios" | "json-viewer" | "test-cases">("workspace")
+  const [currentView, setCurrentView] = useState<"workspace" | "scenarios" | "json-viewer" | "scenario-viewer">("workspace")
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationComplete, setGenerationComplete] = useState(false)
   const [generatedStats, setGeneratedStats] = useState({ scenarios: 0, testCases: 0 })
   const [showExportReport, setShowExportReport] = useState(false)
-  const [generatedData, setGeneratedData] = useState<any>(null)
+  const [generatedData, setGeneratedData] = useState<GeneratedScenariosResponse | null>(null)
   const [generationError, setGenerationError] = useState<string | null>(null)
   const [customFilePath, setCustomFilePath] = useState<string>("")
   const [showCustomPathInput, setShowCustomPathInput] = useState(false)
@@ -38,10 +38,18 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       if (!srs?.id) return
       setLoadingExisting(true)
       try {
+        console.log("Checking existing scenarios for SRS ID:", srs.id)
+        console.log("API URL:", `${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/srs/${srs.id}`)
+        
         const list = await getScenariosBySrsId(srs.id)
+        console.log("Existing scenarios response:", list)
+        
         if (cancelled) return
-        setHasExistingScenarios(Array.isArray(list) && list.length > 0)
+        const hasScenarios = Array.isArray(list) && list.length > 0
+        setHasExistingScenarios(hasScenarios)
+        console.log("Has existing scenarios:", hasScenarios)
       } catch (e) {
+        console.error("Error checking existing scenarios:", e)
         if (!cancelled) setHasExistingScenarios(false)
       } finally {
         if (!cancelled) setLoadingExisting(false)
@@ -51,7 +59,7 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
     return () => { cancelled = true }
   }, [srs?.id])
 
-  const handleViewScenarios = () => {
+  const handleViewScenariosManagement = () => {
     setCurrentView("scenarios")
   }
 
@@ -63,55 +71,56 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
     setCurrentView("json-viewer")
   }
 
-  const handleViewTestCases = () => {
-    // Nếu DB đã có scenario, load từ DB vào viewer
-    if (hasExistingScenarios && srs?.id) {
+  const handleViewScenarios = () => {
+    // Luôn request API để lấy scenarios từ database
+    if (srs?.id) {
       ;(async () => {
         try {
+          console.log("Loading scenarios for SRS ID:", srs.id)
+          console.log("API URL:", `${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/srs/${srs.id}`)
+          
           const list = await getScenariosBySrsId(srs.id)
-          const descriptions = Array.isArray(list) ? list.map((s: any) => s.description).filter(Boolean) : []
-          setGeneratedData({ test_cases: descriptions })
+          console.log("Raw API response:", list)
+          
+          const scenarios = Array.isArray(list) ? list.map((s: any) => {
+            try {
+              // Nếu description đã là object thì dùng luôn, nếu là string thì parse
+              if (typeof s.description === 'string') {
+                return JSON.parse(s.description)
+              } else {
+                return s.description
+              }
+            } catch (e) {
+              console.warn("Failed to parse scenario description:", e, "Raw description:", s.description)
+              return null
+            }
+          }).filter(Boolean) : []
+          
+          console.log("Parsed scenarios:", scenarios)
+          
+          // Cập nhật data và chuyển sang viewer
+          setGeneratedData({ scenarios })
+          setGenerationComplete(true) // Đánh dấu là đã có data
+          setGeneratedStats({ scenarios: scenarios.length, testCases: 0 })
+          console.log("Loaded scenarios from database:", scenarios)
+          
+          // Chuyển sang viewer
+          setCurrentView("scenario-viewer")
         } catch (e) {
-          console.warn("[SRSWorkspace] Load existing scenarios failed", e)
-        } finally {
-          setCurrentView("test-cases")
+          console.error("[SRSWorkspace] Load existing scenarios failed", e)
+          setGeneratedData({ scenarios: [] })
+          setCurrentView("scenario-viewer")
         }
       })()
       return
     }
 
-    // Chưa có DB: mở viewer ngay và đồng thời lưu vào DB ở background (tuần tự để giữ thứ tự)
-    setCurrentView("test-cases")
-    try {
-      const cases = (generatedData?.test_cases ?? generatedData?.testCases) || []
-      if (Array.isArray(cases) && cases.length > 0 && srs?.id) {
-        ;(async () => {
-          let failed = 0
-          for (let i = 0; i < cases.length; i++) {
-            const tc = cases[i]
-            try {
-              const title = tc?.["Test Objective"] ?? ""
-              const description = tc
-              const webUrl = ""
-              await createScenario({ srsId: srs.id, title, description, webUrl })
-            } catch (e) {
-              failed++
-              console.warn(`[SRSWorkspace] Persist scenario index ${i} failed`, e)
-            }
-          }
-          if (failed > 0) {
-            console.warn(`[SRSWorkspace] Persist scenarios: ${failed} failed / ${cases.length}`)
-          }
-        })().catch((e) => {
-          console.warn("[SRSWorkspace] Persist scenarios unexpected error", e)
-        })
-      }
-    } catch (e) {
-      console.warn("[SRSWorkspace] Persist scenarios error", e)
-    }
+    // Không có SRS ID: mở viewer với data rỗng
+    setGeneratedData({ scenarios: [] })
+    setCurrentView("scenario-viewer")
   }
 
-  const handleGenerateTestCases = async () => {
+  const handleGenerateScenarios = async () => {
     setIsGenerating(true)
     setGenerationComplete(false)
     setGenerationError(null)
@@ -131,10 +140,10 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
         absPath = `uploads/${absPath}`
       }
 
-      console.log("Generating test cases for path:", absPath)
+      console.log("Generating scenarios for path:", absPath)
       console.log("SRS object:", srs)
       
-      // Gọi API để generate test cases
+      // Gọi API để generate scenarios
       const response = await getScenariosJSONByAbsPath(absPath)
       
       // Validate response
@@ -145,16 +154,44 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       
       // Tính stats từ response
       const scenarios = validatedData.scenarios?.length || 0
-      const testCases = validatedData.testCases?.length || 0
       
-      setGeneratedStats({ scenarios, testCases })
+      setGeneratedStats({ scenarios, testCases: 0 })
       setGenerationComplete(true)
       
-      console.log("Generated test cases:", validatedData)
+      // Lưu scenarios vào database ngay lập tức
+      if (validatedData.scenarios && validatedData.scenarios.length > 0 && srs?.id) {
+        const scenarios = validatedData.scenarios
+        ;(async () => {
+          let failed = 0
+          for (let i = 0; i < scenarios.length; i++) {
+            const scenario = scenarios[i]
+            try {
+              const title = scenario.Title || ""
+              const description = JSON.stringify(scenario, null, 2) // Toàn bộ nội dung scenario
+              const webUrl = ""
+              await createScenario({ srsId: srs.id, title, description, webUrl })
+            } catch (e) {
+              failed++
+              console.warn(`[SRSWorkspace] Persist scenario index ${i} failed`, e)
+            }
+          }
+          if (failed > 0) {
+            console.warn(`[SRSWorkspace] Persist scenarios: ${failed} failed / ${scenarios.length}`)
+          } else {
+            console.log(`[SRSWorkspace] Successfully saved ${scenarios.length} scenarios to database`)
+            // Cập nhật state để nút chuyển thành "View Scenarios"
+            setHasExistingScenarios(true)
+          }
+        })().catch((e) => {
+          console.warn("[SRSWorkspace] Persist scenarios unexpected error", e)
+        })
+      }
+      
+      console.log("Generated scenarios:", validatedData)
       
     } catch (error: any) {
-      console.error("Error generating test cases:", error)
-      setGenerationError(error.message || "Failed to generate test cases")
+      console.error("Error generating scenarios:", error)
+      setGenerationError(error.message || "Failed to generate scenarios")
     } finally {
       setIsGenerating(false)
     }
@@ -233,10 +270,10 @@ Generated by RPA4Web Testing Tool
   }
 
   if (currentView === "json-viewer" && generatedData) {
-    return <JSONViewer data={generatedData} title="Generated Test Cases" onBack={handleBackToWorkspace} />
+    return <JSONViewer data={generatedData} title="Generated Scenarios" onBack={handleBackToWorkspace} />
   }
 
-  if (currentView === "test-cases" && generatedData) {
+  if (currentView === "scenario-viewer" && generatedData) {
     return <TestCasesViewer data={generatedData} onBack={handleBackToWorkspace} />
   }
 
@@ -261,19 +298,18 @@ Generated by RPA4Web Testing Tool
                   <div className="flex items-center space-x-2 text-blue-800">
                     <CheckCircle className="h-4 w-4 text-blue-600" />
                     <span className="font-medium">
-                      Test cases generated successfully! {generatedStats.scenarios} scenarios and{" "}
-                      {generatedStats.testCases} test cases created.
+                      Scenarios generated successfully! {generatedStats.scenarios} scenarios created.
                     </span>
                   </div>
                   <div className="flex space-x-2">
                     <Button 
                       variant="outline" 
                       size="sm" 
-                      onClick={handleViewTestCases}
+                      onClick={handleViewScenarios}
                       className="text-blue-800 border-blue-300 hover:bg-blue-100"
                     >
                       <Play className="h-4 w-4 mr-2" />
-                      View Test Cases
+                      View Scenarios
                     </Button>
                     <Button 
                       variant="outline" 
@@ -297,7 +333,7 @@ Generated by RPA4Web Testing Tool
               <CardContent className="pt-6">
                 <div className="flex items-center space-x-2 text-red-800">
                   <span className="font-medium">
-                    Error generating test cases: {generationError}
+                    Error generating scenarios: {generationError}
                   </span>
                 </div>
               </CardContent>
@@ -390,12 +426,8 @@ Generated by RPA4Web Testing Tool
                     <Badge variant="secondary">Complete</Badge>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <span className="text-sm text-muted-foreground">Test Cases:</span>
-                    <Badge>{generationComplete ? `${generatedStats.testCases} Generated` : "3 Generated"}</Badge>
-                  </div>
-                  <div className="flex items-center space-x-2">
                     <span className="text-sm text-muted-foreground">Scenarios:</span>
-                    <Badge>{generationComplete ? `${generatedStats.scenarios} Active` : "1 Active"}</Badge>
+                    <Badge>{generationComplete ? `${generatedStats.scenarios} Generated` : "0 Generated"}</Badge>
                   </div>
                 </div>
               </div>
@@ -412,17 +444,15 @@ Generated by RPA4Web Testing Tool
             <CardContent>
               <div className="space-y-3 text-sm text-blue-700">
                 <div className="flex items-start space-x-2">
-                  <span className="font-medium">First time:</span>
+                  <span className="font-medium">Generate Scenarios:</span>
                   <span>
-                    When uploading an SRS for the first time, click "Generate Test Case" to create test scenarios and
-                    cases automatically.
+                    Click "Generate Scenarios" to create test scenarios automatically from SRS document.
                   </span>
                 </div>
                 <div className="flex items-start space-x-2">
-                  <span className="font-medium">Subsequent times:</span>
+                  <span className="font-medium">View Scenarios:</span>
                   <span>
-                    For existing SRS documents, go to "Test Scenario Management" to view, edit, and manage your test
-                    scenarios.
+                    Click "View Scenarios" to see the generated scenarios in a structured format.
                   </span>
                 </div>
               </div>
@@ -430,21 +460,21 @@ Generated by RPA4Web Testing Tool
           </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
-            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={hasExistingScenarios ? handleViewTestCases : handleGenerateTestCases}>
+            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={hasExistingScenarios ? handleViewScenarios : handleGenerateScenarios}>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-3 mb-3">
                   <div className="p-2 bg-green-100 rounded-lg">
                     <Play className="h-5 w-5 text-green-600" />
                   </div>
-                  <h3 className="font-semibold">{hasExistingScenarios ? "View Test Cases" : (isGenerating ? "Generating..." : "Generate Test Cases")}</h3>
+                  <h3 className="font-semibold">{hasExistingScenarios ? "View Scenarios" : (isGenerating ? "Generating..." : "Generate Scenarios")}</h3>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  {hasExistingScenarios ? "Open existing test cases from database" : (isGenerating ? "Creating test cases..." : "Automatically generate test cases from SRS")}
+                  {hasExistingScenarios ? "View scenarios from database" : (isGenerating ? "Creating scenarios..." : "Automatically generate scenarios from SRS")}
                 </p>
               </CardContent>
             </Card>
 
-            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={handleViewScenarios}>
+            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={handleViewScenariosManagement}>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-3 mb-3">
                   <div className="p-2 bg-blue-100 rounded-lg">
