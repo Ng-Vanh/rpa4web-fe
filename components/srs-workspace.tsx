@@ -85,10 +85,17 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
           const scenarios = Array.isArray(list) ? list.map((s: any) => {
             try {
               // Nếu description đã là object thì dùng luôn, nếu là string thì parse
+              let parsedDescription
               if (typeof s.description === 'string') {
-                return JSON.parse(s.description)
+                parsedDescription = JSON.parse(s.description)
               } else {
-                return s.description
+                parsedDescription = s.description
+              }
+              
+              // Thêm ID từ database vào scenario
+              return {
+                ...parsedDescription,
+                id: s.id
               }
             } catch (e) {
               console.warn("Failed to parse scenario description:", e, "Raw description:", s.description)
