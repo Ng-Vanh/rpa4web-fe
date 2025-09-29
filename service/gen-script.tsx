@@ -15,4 +15,16 @@ const generateTestScript = async (testCaseId: number) => {
     }
 };
 
-export { generateTestScript };
+const generateAllTestScripts = async (testCaseId: number) => {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/gen-python/generate-all/${testCaseId}`, {}, {
+            headers: getAuthHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error generating all test scripts:", error);
+        throw error;
+    }
+};
+
+export { generateTestScript, generateAllTestScripts };
