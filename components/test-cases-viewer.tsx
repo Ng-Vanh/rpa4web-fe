@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2 } from "lucide-react"
+import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2 } from "lucide-react"
+import { generateTestCases } from "@/service/testcase"
 
 interface Scenario {
   UC_id: string
@@ -17,6 +18,21 @@ interface Scenario {
   "Expected Result": string
   s_id: string
   id?: number // ID từ database để update
+}
+
+interface GeneratedTestCase {
+  test_item: string
+  test_classification: string
+  steps: {
+    step_order: number
+    action_description: string
+    input_data: any
+    expected_output: string
+  }[]
+}
+
+interface GeneratedTestCases {
+  test_cases: GeneratedTestCase[]
 }
 
 interface TestCasesViewerProps {
@@ -35,6 +51,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [scenariosState, setScenariosState] = useState<Scenario[]>(data.scenarios || [])
+  const [generatedTestCases, setGeneratedTestCases] = useState<Record<string, GeneratedTestCases>>({})
+  const [isGeneratingTC, setIsGeneratingTC] = useState<string | null>(null)
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
@@ -239,6 +257,25 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }
 
+  const handleGenerateTestCases = async (sId: string) => {
+    const scenario = scenarios.find(s => s.S_id === sId)
+    if (!scenario) return
+
+    setIsGeneratingTC(sId)
+    try {
+      const result = await generateTestCases(scenario)
+      setGeneratedTestCases(prev => ({
+        ...prev,
+        [sId]: result
+      }))
+    } catch (error) {
+      console.error("Error generating test cases:", error)
+      alert("Có lỗi xảy ra khi tạo test cases. Vui lòng thử lại.")
+    } finally {
+      setIsGeneratingTC(null)
+    }
+  }
+
   const scenarios = scenariosState
 
   return (
@@ -390,10 +427,18 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => toggleTestCase(scenario.S_id)}
+                            onClick={() => handleGenerateTestCases(scenario.S_id)}
+                            disabled={isGeneratingTC === scenario.S_id}
                             className="text-gray-500 hover:text-gray-700"
                           >
-                            Gen TCs
+                            {isGeneratingTC === scenario.S_id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                                Generating...
+                              </>
+                            ) : (
+                              "Gen TCs"
+                            )}
                           </Button>
                         </>
                       )}
@@ -485,6 +530,22 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       )}
                     </div>
                   </div>
+
+                  {/* Generated Test Cases */}
+                  {generatedTestCases[scenario.S_id] && (
+                    <div className="mb-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="font-semibold text-gray-700 min-w-[100px]">Generated TCs:</span>
+                        <div className="flex-1">
+                          <div className="bg-gray-50 p-4 rounded-lg border">
+                            <pre className="text-sm text-gray-700 whitespace-pre-wrap overflow-auto max-h-96">
+                              {JSON.stringify(generatedTestCases[scenario.S_id], null, 2)}
+                            </pre>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {/* Test Data - chỉ hiển thị khi showTestData = true
                   {showTestData && scenario["Test Data"] && (

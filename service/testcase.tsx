@@ -62,4 +62,19 @@ const createTestCase = async (data: any) => {
     }
 }
 
-export { getAllTestCases, getTestCaseById, createTestCase };
+const generateTestCases = async (scenario: any) => {
+    try {
+        const response = await axios.post(`${process.env.NEXT_PUBLIC_GEN_TC_BACKEND_URL}/gentc`, scenario, {
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
+        console.log('Generated test cases:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error generating test cases:", error);
+        throw error;
+    }
+}
+
+export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases };
