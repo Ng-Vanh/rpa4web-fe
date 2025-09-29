@@ -1,5 +1,6 @@
 import axios from "axios";
 import { getAuthHeaders } from "./auth-utils";
+import { createNewTestCaseStep } from "./testcase-step";
 const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
 
 const getAllTestCases = async (scenario_id:number ) => {
@@ -77,4 +78,50 @@ const generateTestCases = async (scenario: any) => {
     }
 }
 
-export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases };
+const createTestCaseWithSteps = async (scenarioId: number, testCases: any[]) => {
+    try {
+        const results = [];
+        
+        for (const testCase of testCases) {
+            // Tạo test case
+            const testCaseData = {
+                scenarioId: scenarioId,
+                testItem: testCase.test_item,
+                testClassification: testCase.test_classification,
+                runConfig: null // Có thể để null hoặc thêm config mặc định
+            };
+            
+            const createdTestCase = await createTestCase(testCaseData);
+            console.log('Created test case:', createdTestCase);
+            
+            // Tạo các steps cho test case này
+            const stepResults = [];
+            for (const step of testCase.steps) {
+                const stepData = {
+                    testCaseId: createdTestCase.id,
+                    stepOrder: step.step_order,
+                    actionDescription: step.action_description,
+                    inputData: JSON.stringify(step.input_data),
+                    expectedOutput: step.expected_output,
+                    scriptCode: "" // Có thể để trống hoặc thêm script mặc định
+                };
+                
+                const createdStep = await createNewTestCaseStep(stepData);
+                stepResults.push(createdStep);
+                console.log('Created test case step:', createdStep);
+            }
+            
+            results.push({
+                testCase: createdTestCase,
+                steps: stepResults
+            });
+        }
+        
+        return results;
+    } catch (error) {
+        console.error("Error creating test cases with steps:", error);
+        throw error;
+    }
+}
+
+export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps };

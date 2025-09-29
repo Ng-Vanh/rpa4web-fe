@@ -6,8 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2 } from "lucide-react"
-import { generateTestCases } from "@/service/testcase"
+import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check } from "lucide-react"
+import { generateTestCases, createTestCaseWithSteps } from "@/service/testcase"
 
 interface Scenario {
   UC_id: string
@@ -53,6 +53,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   const [scenariosState, setScenariosState] = useState<Scenario[]>(data.scenarios || [])
   const [generatedTestCases, setGeneratedTestCases] = useState<Record<string, GeneratedTestCases>>({})
   const [isGeneratingTC, setIsGeneratingTC] = useState<string | null>(null)
+  const [isAcceptingTC, setIsAcceptingTC] = useState<string | null>(null)
+  const [acceptedTestCases, setAcceptedTestCases] = useState<Set<string>>(new Set())
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
@@ -273,6 +275,28 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       alert("Có lỗi xảy ra khi tạo test cases. Vui lòng thử lại.")
     } finally {
       setIsGeneratingTC(null)
+    }
+  }
+
+  const handleAcceptTestCases = async (sId: string) => {
+    const scenario = scenarios.find(s => s.S_id === sId)
+    const testCases = generatedTestCases[sId]
+    
+    if (!scenario || !scenario.id || !testCases) return
+
+    setIsAcceptingTC(sId)
+    try {
+      await createTestCaseWithSteps(scenario.id, testCases.test_cases)
+      
+      // Đánh dấu đã accept
+      setAcceptedTestCases(prev => new Set([...prev, sId]))
+      
+      alert(`Đã lưu thành công ${testCases.test_cases.length} test cases vào database!`)
+    } catch (error) {
+      console.error("Error accepting test cases:", error)
+      alert("Có lỗi xảy ra khi lưu test cases. Vui lòng thử lại.")
+    } finally {
+      setIsAcceptingTC(null)
     }
   }
 
@@ -538,6 +562,36 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                         <span className="font-semibold text-gray-700 min-w-[100px]">Generated TCs:</span>
                         <div className="flex-1">
                           <div className="bg-gray-50 p-4 rounded-lg border">
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="text-sm font-medium text-gray-600">
+                                {generatedTestCases[scenario.S_id].test_cases.length} test cases generated
+                              </span>
+                              {acceptedTestCases.has(scenario.S_id) ? (
+                                <Badge variant="default" className="bg-green-100 text-green-800">
+                                  <Check className="h-3 w-3 mr-1" />
+                                  Accepted
+                                </Badge>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleAcceptTestCases(scenario.S_id)}
+                                  disabled={isAcceptingTC === scenario.S_id}
+                                  className="bg-green-600 hover:bg-green-700 text-white"
+                                >
+                                  {isAcceptingTC === scenario.S_id ? (
+                                    <>
+                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                      Saving...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check className="h-3 w-3 mr-1" />
+                                      Accept
+                                    </>
+                                  )}
+                                </Button>
+                              )}
+                            </div>
                             <pre className="text-sm text-gray-700 whitespace-pre-wrap overflow-auto max-h-96">
                               {JSON.stringify(generatedTestCases[scenario.S_id], null, 2)}
                             </pre>
