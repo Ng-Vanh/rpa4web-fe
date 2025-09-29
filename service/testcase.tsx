@@ -1,6 +1,6 @@
 import axios from "axios";
 import { getAuthHeaders } from "./auth-utils";
-import { createNewTestCaseStep } from "./testcase-step";
+import { createNewTestCaseStep, getAllTestCaseSteps } from "./testcase-step";
 const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
 
 const getAllTestCases = async (scenario_id:number ) => {
@@ -124,4 +124,28 @@ const createTestCaseWithSteps = async (scenarioId: number, testCases: any[]) => 
     }
 }
 
-export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps };
+const getTestCasesWithSteps = async (scenarioId: number) => {
+    try {
+        // Lấy danh sách test cases của scenario
+        const testCases = await getAllTestCases(scenarioId);
+        
+        // Lấy steps cho từng test case
+        const testCasesWithSteps = await Promise.all(
+            testCases.map(async (testCase: any) => {
+                const steps = await getAllTestCaseSteps(testCase.id);
+                return {
+                    ...testCase,
+                    steps: steps
+                };
+            })
+        );
+        
+        console.log('Fetched test cases with steps:', testCasesWithSteps);
+        return testCasesWithSteps;
+    } catch (error) {
+        console.error("Error fetching test cases with steps:", error);
+        throw error;
+    }
+}
+
+export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps };

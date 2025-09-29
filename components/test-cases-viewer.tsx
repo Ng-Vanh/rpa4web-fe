@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check } from "lucide-react"
-import { generateTestCases, createTestCaseWithSteps } from "@/service/testcase"
+import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps } from "@/service/testcase"
 
 interface Scenario {
   UC_id: string
@@ -35,6 +35,30 @@ interface GeneratedTestCases {
   test_cases: GeneratedTestCase[]
 }
 
+interface DatabaseTestCase {
+  id: number
+  scenarioId: number
+  testItem: string
+  testClassification: string
+  runConfig: any
+  createdAt: string
+  updatedAt: string
+  steps: DatabaseTestCaseStep[]
+}
+
+interface DatabaseTestCaseStep {
+  id: number
+  testCaseId: number
+  stepOrder: number
+  actionDescription: string
+  inputData: string
+  expectedOutput: string
+  scriptCode: string
+  stepImage: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 interface TestCasesViewerProps {
   data: {
     scenarios?: Scenario[]
@@ -55,6 +79,9 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   const [isGeneratingTC, setIsGeneratingTC] = useState<string | null>(null)
   const [isAcceptingTC, setIsAcceptingTC] = useState<string | null>(null)
   const [acceptedTestCases, setAcceptedTestCases] = useState<Set<string>>(new Set())
+  const [databaseTestCases, setDatabaseTestCases] = useState<Record<string, DatabaseTestCase[]>>({})
+  const [isLoadingDatabaseTC, setIsLoadingDatabaseTC] = useState<string | null>(null)
+  const [expandedTestCases, setExpandedTestCases] = useState<Set<string>>(new Set())
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
@@ -291,6 +318,9 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       // Đánh dấu đã accept
       setAcceptedTestCases(prev => new Set([...prev, sId]))
       
+      // Load lại test cases từ database
+      await loadDatabaseTestCases(sId)
+      
       alert(`Đã lưu thành công ${testCases.test_cases.length} test cases vào database!`)
     } catch (error) {
       console.error("Error accepting test cases:", error)
@@ -298,6 +328,34 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     } finally {
       setIsAcceptingTC(null)
     }
+  }
+
+  const loadDatabaseTestCases = async (sId: string) => {
+    const scenario = scenarios.find(s => s.S_id === sId)
+    if (!scenario || !scenario.id) return
+
+    setIsLoadingDatabaseTC(sId)
+    try {
+      const testCases = await getTestCasesWithSteps(scenario.id)
+      setDatabaseTestCases(prev => ({
+        ...prev,
+        [sId]: testCases
+      }))
+    } catch (error) {
+      console.error("Error loading database test cases:", error)
+    } finally {
+      setIsLoadingDatabaseTC(null)
+    }
+  }
+
+  const toggleTestCaseExpansion = (tcId: string) => {
+    const newExpanded = new Set(expandedTestCases)
+    if (newExpanded.has(tcId)) {
+      newExpanded.delete(tcId)
+    } else {
+      newExpanded.add(tcId)
+    }
+    setExpandedTestCases(newExpanded)
   }
 
   const scenarios = scenariosState
@@ -596,6 +654,113 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                               {JSON.stringify(generatedTestCases[scenario.S_id], null, 2)}
                             </pre>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Database Test Cases */}
+                  {databaseTestCases[scenario.S_id] && databaseTestCases[scenario.S_id].length > 0 && (
+                    <div className="mb-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
+                        <div className="flex-1">
+                          <div className="space-y-3">
+                            {databaseTestCases[scenario.S_id].map((testCase, tcIndex) => (
+                              <Card key={testCase.id} className="border-l-4 border-l-blue-500">
+                                <CardContent className="p-4">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center space-x-2">
+                                      <h4 className="font-semibold text-gray-900">
+                                        {tcIndex + 1}. {testCase.testItem}
+                                      </h4>
+                                      <Badge 
+                                        variant={testCase.testClassification === 'Positive' ? 'default' : 'secondary'}
+                                        className={testCase.testClassification === 'Positive' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
+                                      >
+                                        {testCase.testClassification}
+                                      </Badge>
+                                    </div>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => toggleTestCaseExpansion(`${scenario.S_id}-${testCase.id}`)}
+                                      className="text-gray-500 hover:text-gray-700"
+                                    >
+                                      {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) ? 'Collapse' : 'Expand'}
+                                    </Button>
+                                  </div>
+                                  
+                                  {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) && (
+                                    <div className="space-y-2">
+                                      <div className="text-sm text-gray-600 mb-3">
+                                        <strong>Steps ({testCase.steps.length}):</strong>
+                                      </div>
+                                      {testCase.steps
+                                        .sort((a, b) => a.stepOrder - b.stepOrder)
+                                        .map((step, stepIndex) => (
+                                        <div key={step.id} className="bg-white p-3 rounded border">
+                                          <div className="flex items-start space-x-3">
+                                            <div className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">
+                                              {step.stepOrder}
+                                            </div>
+                                            <div className="flex-1 space-y-2">
+                                              <div>
+                                                <span className="font-medium text-gray-900">Action:</span>
+                                                <p className="text-gray-700 mt-1">{step.actionDescription}</p>
+                                              </div>
+                                              {step.inputData && step.inputData !== '{}' && (
+                                                <div>
+                                                  <span className="font-medium text-gray-900">Input Data:</span>
+                                                  <p className="text-gray-700 mt-1 text-sm bg-gray-50 p-2 rounded">
+                                                    {step.inputData}
+                                                  </p>
+                                                </div>
+                                              )}
+                                              <div>
+                                                <span className="font-medium text-gray-900">Expected Output:</span>
+                                                <p className="text-gray-700 mt-1">{step.expectedOutput}</p>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Load Database Test Cases Button */}
+                  {!databaseTestCases[scenario.S_id] && scenario.id && (
+                    <div className="mb-4">
+                      <div className="flex items-start space-x-2">
+                        <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
+                        <div className="flex-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => loadDatabaseTestCases(scenario.S_id)}
+                            disabled={isLoadingDatabaseTC === scenario.S_id}
+                            className="text-blue-600 hover:text-blue-700"
+                          >
+                            {isLoadingDatabaseTC === scenario.S_id ? (
+                              <>
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                Loading...
+                              </>
+                            ) : (
+                              <>
+                                <Eye className="h-4 w-4 mr-2" />
+                                Load Saved Test Cases
+                              </>
+                            )}
+                          </Button>
                         </div>
                       </div>
                     </div>
