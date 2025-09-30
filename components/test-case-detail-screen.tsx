@@ -4,6 +4,12 @@ import type React from "react";
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -17,10 +23,13 @@ import {
   FileText,
   Edit,
   Code,
+  FileCode,
   Save,
   X,
   Upload,
   Trash2,
+  Layers,
+  Eye,
 } from "lucide-react";
 import {
   mockExpectedResults,
@@ -40,8 +49,10 @@ import {
 import {
   generateTestScript,
   generateAllTestScripts,
+  getTestScript,
 } from "@/service/gen-script";
 import { executeStep, getExecutionSteps } from "@/service/testcase-step";
+import { IconExpandButton } from "./ui/icon-expand-button";
 
 interface TestCaseDetailScreenProps {
   onBack: () => void;
@@ -110,6 +121,12 @@ export function TestCaseDetailScreen({
 
   // Add step execution states
   const [executingSteps, setExecutingSteps] = useState<Set<number>>(new Set());
+
+  // quản lý popup và nội dung script code
+  const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
+  const [fullScript, setFullScript] = useState<string>("");
+  const [scriptError, setScriptError] = useState<string>("");
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
   // Add execution steps state to track screenshots separately
   const [executionSteps, setExecutionSteps] = useState<{
@@ -548,6 +565,31 @@ export function TestCaseDetailScreen({
       alert(errorMessage);
     } finally {
       setIsGeneratingAllScripts(false);
+    }
+  };
+
+  const handleViewFullScript = async () => {
+    try {
+      setScriptError("");
+      const script = await getTestScript(testCase.id);
+      if (script) {
+        setFullScript(script);
+        setIsScriptModalOpen(true);
+      } else {
+        setScriptError(
+          "Please run 'Generate All Test Scripts' to generate the script first."
+        );
+        setIsScriptModalOpen(true);
+      }
+    } catch (error) {
+      console.error("Failed to get test script:", error);
+      let errorMessage =
+        "Please run 'Generate All Test Scripts' to generate the script first.";
+      if (error instanceof Error) {
+        errorMessage = `Error: ${error.message}. Please run 'Generate All Test Scripts'.`;
+      }
+      setScriptError(errorMessage);
+      setIsScriptModalOpen(true);
     }
   };
 
@@ -1368,24 +1410,33 @@ export function TestCaseDetailScreen({
                 <Play className="h-4 w-4 mr-2" />
                 Run Test
               </Button>
-              <Button
-                variant="outline"
+
+              <IconExpandButton
+                icon={<FileCode className="h-4 w-4" />}
+                text={
+                  isGeneratingScript ? "Generating..." : "Generate Test Script"
+                }
                 onClick={handleGenerateScript}
                 disabled={isGeneratingScript}
-              >
-                <Code className="h-4 w-4 mr-2" />
-                {isGeneratingScript ? "Generating..." : "Generate Test Script"}
-              </Button>
-              <Button
-                variant="outline"
+              />
+
+              <IconExpandButton
+                icon={<Layers className="h-4 w-4 " />}
+                text={
+                  isGeneratingAllScripts
+                    ? "Generating All..."
+                    : "Generate All Test Scripts"
+                }
                 onClick={handleGenerateAllScripts}
                 disabled={isGeneratingAllScripts || steps.length === 0}
-              >
-                <Code className="h-4 w-4 mr-2" />
-                {isGeneratingAllScripts
-                  ? "Generating All..."
-                  : "Generate All Test Scripts"}
-              </Button>
+              />
+
+              <IconExpandButton
+                icon={<Eye className="h-4 w-4 " />}
+                text="View Full Script"
+                onClick={handleViewFullScript}
+                disabled={isGeneratingAllScripts || steps.length === 0}
+              />
             </div>
           )}
         </div>
@@ -1399,6 +1450,68 @@ export function TestCaseDetailScreen({
         step={editingStep}
         onSave={handleStepModalSave}
       />
+
+      {isScriptModalOpen && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
+          <Card className="w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <CardHeader className="flex-shrink-0">
+              <CardTitle className="text-xl">Full Test Script</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {fullScript
+                  ? "Below is the complete generated test script."
+                  : scriptError || "No script available."}
+              </p>
+            </CardHeader>
+            <CardContent className="flex-1 overflow-hidden flex flex-col">
+              {fullScript ? (
+                <div className="relative flex-1 overflow-hidden">
+                  <pre className="bg-muted p-4 rounded-lg w-full h-full max-h-[70vh] overflow-auto whitespace-pre-wrap break-words">
+                    <code className="text-sm">{fullScript}</code>
+                  </pre>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="absolute top-2 right-8"
+                    onClick={() => {
+                      navigator.clipboard.writeText(fullScript);
+                      setCopyMessage("Copied!");
+                      setTimeout(() => setCopyMessage(null), 2000);
+                    }}
+                  >
+                    {copyMessage === "Copied!" ? (
+                      <span className="text-xs">Copied!</span>
+                    ) : (
+                      <FileText className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              ) : (
+                <div className="p-4 bg-red-50 text-red-700 rounded-lg">
+                  <p>{scriptError}</p>
+                  <Button
+                    className="mt-4 bg-green-600 hover:bg-green-700 text-white"
+                    onClick={() => {
+                      setIsScriptModalOpen(false);
+                      handleGenerateAllScripts();
+                    }}
+                  >
+                    <Code className="h-4 w-4 mr-2" />
+                    Generate All Test Scripts
+                  </Button>
+                </div>
+              )}
+              <div className="mt-4 flex justify-end flex-shrink-0">
+                <Button
+                  variant="outline"
+                  onClick={() => setIsScriptModalOpen(false)}
+                >
+                  Close
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }
