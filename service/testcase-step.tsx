@@ -272,6 +272,29 @@ const getExecutionSteps = async (executionId: number) => {
     }
 }
 
+const checkScore = async (stepId: number) => {
+    try {
+        if (!stepId || stepId <= 0) {
+            throw new Error('Invalid step ID');
+        }
+
+        const response = await axios.get(`${API_BASE_URL}/test-execution-steps/${stepId}/check-score`, {
+            headers: {
+                ...getAuthHeaders(),
+            },
+        });
+
+        console.log('Fetched test case step score:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error fetching test case step score:", error);
+        if (axios.isAxiosError(error)) {
+            console.error('Fetch error response:', error.response?.data);
+        }
+        throw error;
+    }
+}
+
 export { 
     getAllTestCaseSteps, 
     createNewTestCaseStep, 
@@ -280,5 +303,6 @@ export {
     uploadStepImage,
     validateImageFile,
     executeStep,
-    getExecutionSteps
+    getExecutionSteps,
+    checkScore
 };
