@@ -32,7 +32,7 @@ import {     getAllTestCaseSteps,
   uploadStepImage,
   validateImageFile  } from "@/service/testcase-step"
 import { generateTestScript } from "@/service/gen-script" 
-import { executeStep, getExecutionSteps } from "@/service/testcase-step" 
+import { executeStep, getExecutionSteps,checkScore } from "@/service/testcase-step" 
 
 interface TestCaseDetailScreenProps {
   onBack: () => void
@@ -564,16 +564,26 @@ const handleStepModalSave = async (updatedStep: any) => {
     }
   }
 
-  const handleCheckStepScore = (stepId: number) => {
-    // Simulate score checking for individual step
-    const score = Math.random() > 0.2 ? 1 : 0.8
-    const status = score === 1 ? "Matched" : "Partial Match"
+const handleCheckStepScore = async (stepId: number) => {
+  try {
+    const result = await checkScore(stepId);
+
+    // giả sử API trả về { score: number, status: string }
+    const { score, status } = result;
 
     setStepScoreResults((prev) => ({
       ...prev,
       [stepId]: { score, status },
-    }))
+    }));
+  } catch (error) {
+    console.error("Failed to check step score:", error);
+    setStepScoreResults((prev) => ({
+      ...prev,
+      [stepId]: { score: 0, status: "Error" },
+    }));
   }
+};
+
 
   const isStepExecuted = (step: any) => {
     return step.scriptCode && step.scriptCode.trim() !== ""
