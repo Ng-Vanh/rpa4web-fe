@@ -70,8 +70,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   const [showTestData, setShowTestData] = useState(false)
   const [isGeneratingAll, setIsGeneratingAll] = useState(false)
   const [expandedCases, setExpandedCases] = useState<Set<string>>(new Set())
-  const [editingScenario, setEditingScenario] = useState<string | null>(null)
-  const [editedScenarios, setEditedScenarios] = useState<Record<string, Scenario>>({})
+  const [editingScenario, setEditingScenario] = useState<number | null>(null)
+  const [editedScenarios, setEditedScenarios] = useState<Record<number, Scenario>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState<string | null>(null)
   const [scenariosState, setScenariosState] = useState<Scenario[]>(data.scenarios || [])
@@ -128,39 +128,39 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }, 4000)
   }
 
-  const handleEdit = (sId: string) => {
-    const scenario = scenarios.find(s => s.S_id === sId)
+  const handleEdit = (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
     if (scenario) {
-      setEditingScenario(sId)
+      setEditingScenario(scenarioId)
       setEditedScenarios(prev => ({
         ...prev,
-        [sId]: { ...scenario }
+        [scenarioId]: { ...scenario }
       }))
     }
   }
 
-  const handleCancelEdit = (sId: string) => {
+  const handleCancelEdit = (scenarioId: number) => {
     setEditingScenario(null)
     setEditedScenarios(prev => {
       const newState = { ...prev }
-      delete newState[sId]
+      delete newState[scenarioId]
       return newState
     })
   }
 
-  const handleFieldChange = (sId: string, field: keyof Scenario, value: string | string[]) => {
+  const handleFieldChange = (scenarioId: number, field: keyof Scenario, value: string | string[]) => {
     setEditedScenarios(prev => ({
       ...prev,
-      [sId]: {
-        ...prev[sId],
+      [scenarioId]: {
+        ...prev[scenarioId],
         [field]: value
       }
     }))
   }
 
-  const handleStepChange = (sId: string, stepIndex: number, value: string) => {
+  const handleStepChange = (scenarioId: number, stepIndex: number, value: string) => {
     setEditedScenarios(prev => {
-      const scenario = prev[sId]
+      const scenario = prev[scenarioId]
       if (!scenario) return prev
       
       const newSteps = [...scenario.Steps]
@@ -168,7 +168,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       
       return {
         ...prev,
-        [sId]: {
+        [scenarioId]: {
           ...scenario,
           Steps: newSteps
         }
@@ -176,14 +176,14 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     })
   }
 
-  const handleAddStep = (sId: string) => {
+  const handleAddStep = (scenarioId: number) => {
     setEditedScenarios(prev => {
-      const scenario = prev[sId]
+      const scenario = prev[scenarioId]
       if (!scenario) return prev
       
       return {
         ...prev,
-        [sId]: {
+        [scenarioId]: {
           ...scenario,
           Steps: [...scenario.Steps, ""]
         }
@@ -191,16 +191,16 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     })
   }
 
-  const handleRemoveStep = (sId: string, stepIndex: number) => {
+  const handleRemoveStep = (scenarioId: number, stepIndex: number) => {
     setEditedScenarios(prev => {
-      const scenario = prev[sId]
+      const scenario = prev[scenarioId]
       if (!scenario) return prev
       
       const newSteps = scenario.Steps.filter((_, index) => index !== stepIndex)
       
       return {
         ...prev,
-        [sId]: {
+        [scenarioId]: {
           ...scenario,
           Steps: newSteps
         }
@@ -208,8 +208,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     })
   }
 
-  const handleSave = async (sId: string) => {
-    const editedScenario = editedScenarios[sId]
+  const handleSave = async (scenarioId: number) => {
+    const editedScenario = editedScenarios[scenarioId]
     if (!editedScenario || !editedScenario.id) return
 
     setIsSaving(true)
@@ -231,11 +231,11 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         setEditingScenario(null)
         setEditedScenarios(prev => {
           const newState = { ...prev }
-          delete newState[sId]
+          delete newState[scenarioId]
           return newState
         })
         // Cập nhật state cục bộ với data đã edit
-        setScenariosState(prev => prev.map(s => s.S_id === sId ? editedScenario : s))
+        setScenariosState(prev => prev.map(s => s.id === scenarioId ? editedScenario : s))
         // Có thể thêm toast notification ở đây
       } else {
         console.error("Failed to update scenario:", response.statusText)
@@ -247,8 +247,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }
 
-  const handleDelete = async (sId: string) => {
-    const scenario = scenarios.find(s => s.S_id === sId)
+  const handleDelete = async (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario || !scenario.id) return
 
     // Xác nhận trước khi xóa
@@ -256,7 +256,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       return
     }
 
-    setIsDeleting(sId)
+    setIsDeleting(scenarioId.toString())
     try {
       const response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/${scenario.id}`, {
         method: 'DELETE',
@@ -268,9 +268,9 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       if (response.ok) {
         console.log("Scenario deleted successfully")
         // Cập nhật danh sách cục bộ, không reload trang
-        setScenariosState(prev => prev.filter(s => s.S_id !== sId))
+        setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
         // Nếu đang edit item vừa bị xóa, thoát edit mode
-        if (editingScenario === sId) {
+        if (editingScenario === scenarioId) {
           setEditingScenario(null)
         }
         // Có thể thêm toast notification ở đây
@@ -286,10 +286,11 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }
 
-  const handleGenerateTestCases = async (sId: string) => {
-    const scenario = scenarios.find(s => s.S_id === sId)
+  const handleGenerateTestCases = async (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario) return
 
+    const sId = scenario.S_id // Sử dụng S_id làm key cho generatedTestCases
     setIsGeneratingTC(sId)
     try {
       const result = await generateTestCases(scenario)
@@ -305,11 +306,12 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }
 
-  const handleAcceptTestCases = async (sId: string) => {
-    const scenario = scenarios.find(s => s.S_id === sId)
-    const testCases = generatedTestCases[sId]
+  const handleAcceptTestCases = async (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
+    const sId = scenario?.S_id
+    const testCases = sId ? generatedTestCases[sId] : null
     
-    if (!scenario || !scenario.id || !testCases) return
+    if (!scenario || !scenario.id || !testCases || !sId) return
 
     setIsAcceptingTC(sId)
     try {
@@ -426,8 +428,8 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         <div className="space-y-6">
           {scenarios.map((scenario, index) => {
             const isExpanded = expandedCases.has(scenario.S_id)
-            const isEditing = editingScenario === scenario.S_id
-            const editedScenario = editedScenarios[scenario.S_id] || scenario
+            const isEditing = editingScenario === scenario.id
+            const editedScenario = scenario.id ? editedScenarios[scenario.id] || scenario : scenario
             
             return (
               <Card key={scenario.S_id} className="hover:shadow-md transition-shadow">
@@ -442,7 +444,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                               <span className="font-mono text-blue-600">{scenario.s_id}:</span>
                               <Input
                                 value={editedScenario["Title"]}
-                                onChange={(e) => handleFieldChange(scenario.S_id, "Title", e.target.value)}
+                                onChange={(e) => handleFieldChange(scenario.id!, "Title", e.target.value)}
                                 className="flex-1"
                               />
                             </div>
@@ -450,7 +452,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                               <span className="text-gray-500 text-sm">UC_id:</span>
                               <Input
                                 value={editedScenario.UC_id}
-                                onChange={(e) => handleFieldChange(scenario.S_id, "UC_id", e.target.value)}
+                                onChange={(e) => handleFieldChange(scenario.id!, "UC_id", e.target.value)}
                                 className="w-32"
                               />
                             </div>
@@ -468,7 +470,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleSave(scenario.S_id)}
+                            onClick={() => handleSave(scenario.id!)}
                             disabled={isSaving}
                             className="text-green-600 hover:text-green-700"
                           >
@@ -478,7 +480,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleCancelEdit(scenario.S_id)}
+                            onClick={() => handleCancelEdit(scenario.id!)}
                             className="text-gray-500 hover:text-gray-700"
                           >
                             <X className="h-4 w-4 mr-1" />
@@ -490,7 +492,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleEdit(scenario.S_id)}
+                            onClick={() => handleEdit(scenario.id!)}
                             className="text-blue-600 hover:text-blue-700"
                           >
                             <Edit3 className="h-4 w-4 mr-1" />
@@ -499,7 +501,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(scenario.S_id)}
+                            onClick={() => handleDelete(scenario.id!)}
                             disabled={isDeleting === scenario.S_id}
                             className="text-red-600 hover:text-red-700"
                           >
@@ -509,7 +511,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleGenerateTestCases(scenario.S_id)}
+                            onClick={() => handleGenerateTestCases(scenario.id!)}
                             disabled={isGeneratingTC === scenario.S_id}
                             className="text-gray-500 hover:text-gray-700"
                           >
@@ -534,7 +536,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       {isEditing ? (
                         <Textarea
                           value={editedScenario.Precondition}
-                          onChange={(e) => handleFieldChange(scenario.S_id, "Precondition", e.target.value)}
+                          onChange={(e) => handleFieldChange(scenario.id!, "Precondition", e.target.value)}
                           className="flex-1"
                           rows={2}
                         />
@@ -551,18 +553,18 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       <div className="flex-1">
                         {isEditing ? (
                           <div className="space-y-2">
-                            {editedScenario.Steps.map((step, stepIndex) => (
+                            {editedScenario.Steps.map((step: string, stepIndex: number) => (
                               <div key={stepIndex} className="flex items-center space-x-2">
                                 <span className="text-sm font-mono text-gray-500 w-6">{stepIndex + 1}.</span>
                                 <Input
                                   value={step}
-                                  onChange={(e) => handleStepChange(scenario.S_id, stepIndex, e.target.value)}
+                                  onChange={(e) => handleStepChange(scenario.id!, stepIndex, e.target.value)}
                                   className="flex-1"
                                 />
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => handleRemoveStep(scenario.S_id, stepIndex)}
+                                  onClick={() => handleRemoveStep(scenario.id!, stepIndex)}
                                   className="text-red-500 hover:text-red-700"
                                 >
                                   <X className="h-4 w-4" />
@@ -572,7 +574,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleAddStep(scenario.S_id)}
+                              onClick={() => handleAddStep(scenario.id!)}
                               className="text-blue-600 hover:text-blue-700"
                             >
                               + Add Step
@@ -603,7 +605,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       {isEditing ? (
                         <Textarea
                           value={editedScenario["Expected Result"]}
-                          onChange={(e) => handleFieldChange(scenario.S_id, "Expected Result", e.target.value)}
+                          onChange={(e) => handleFieldChange(scenario.id!, "Expected Result", e.target.value)}
                           className="flex-1"
                           rows={2}
                         />
@@ -632,7 +634,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                               ) : (
                                 <Button
                                   size="sm"
-                                  onClick={() => handleAcceptTestCases(scenario.S_id)}
+                                  onClick={() => handleAcceptTestCases(scenario.id!)}
                                   disabled={isAcceptingTC === scenario.S_id}
                                   className="bg-green-600 hover:bg-green-700 text-white"
                                 >
