@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check } from "lucide-react"
-import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps } from "@/service/testcase"
+import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase } from "@/service/testcase"
+import { updateTestCaseStep } from "@/service/testcase-step"
+import { getAuthHeaders } from "@/service/auth-utils"
 
 interface Scenario {
   UC_id: string
@@ -77,16 +79,37 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   const [scenariosState, setScenariosState] = useState<Scenario[]>(data.scenarios || [])
   const [generatedTestCases, setGeneratedTestCases] = useState<Record<string, GeneratedTestCases>>({})
   const [isGeneratingTC, setIsGeneratingTC] = useState<string | null>(null)
-  const [isAcceptingTC, setIsAcceptingTC] = useState<string | null>(null)
-  const [acceptedTestCases, setAcceptedTestCases] = useState<Set<string>>(new Set())
   const [databaseTestCases, setDatabaseTestCases] = useState<Record<string, DatabaseTestCase[]>>({})
   const [isLoadingDatabaseTC, setIsLoadingDatabaseTC] = useState<string | null>(null)
   const [expandedTestCases, setExpandedTestCases] = useState<Set<string>>(new Set())
+  const [isSavingGeneratedTC, setIsSavingGeneratedTC] = useState<string | null>(null)
+  const [editingGeneratedTC, setEditingGeneratedTC] = useState<string | null>(null)
+  const [editingDatabaseTC, setEditingDatabaseTC] = useState<number | null>(null)
+  const [editedGeneratedTCs, setEditedGeneratedTCs] = useState<Record<string, GeneratedTestCase>>({})
+  const [editedDatabaseTCs, setEditedDatabaseTCs] = useState<Record<number, DatabaseTestCase>>({})
+  const [editedGeneratedSteps, setEditedGeneratedSteps] = useState<Record<string, any>>({})
+  const [editedDatabaseSteps, setEditedDatabaseSteps] = useState<Record<string, any>>({})
+  const [scenariosWithTestCases, setScenariosWithTestCases] = useState<Set<string>>(new Set())
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
     setScenariosState(data.scenarios || [])
   }, [data.scenarios])
+
+  // Check scenarios có test case hay không khi scenarios thay đổi
+  useEffect(() => {
+    const checkAllScenarios = async () => {
+      for (const scenario of scenariosState) {
+        if (scenario.S_id && scenario.id) {
+          await checkScenarioHasTestCases(scenario.S_id)
+        }
+      }
+    }
+    
+    if (scenariosState.length > 0) {
+      checkAllScenarios()
+    }
+  }, [scenariosState])
 
   const toggleTestCase = (sId: string) => {
     const newExpanded = new Set(expandedCases)
@@ -285,11 +308,6 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
           delete next[scenario.S_id]
           return next
         })
-        setAcceptedTestCases(prev => {
-          const next = new Set(prev)
-          next.delete(scenario.S_id)
-          return next
-        })
         // Nếu đang edit item vừa bị xóa, thoát edit mode
         if (editingScenario === scenarioId) {
           setEditingScenario(null)
@@ -327,29 +345,33 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }
 
-  const handleAcceptTestCases = async (scenarioId: number) => {
-    const scenario = scenarios.find(s => s.id === scenarioId)
-    const sId = scenario?.S_id
-    const testCases = sId ? generatedTestCases[sId] : null
-    
-    if (!scenario || !scenario.id || !testCases || !sId) return
 
-    setIsAcceptingTC(sId)
+  const checkScenarioHasTestCases = async (sId: string) => {
+    if (!sId) return false
+
     try {
-      await createTestCaseWithSteps(scenario.id, testCases.test_cases)
+      const scenario = scenarios.find(s => s.S_id === sId)
+      if (!scenario || !scenario.id) {
+        return false
+      }
+
+      const testCases = await getTestCasesWithSteps(scenario.id)
+      const hasTestCases = testCases && testCases.length > 0
       
-      // Đánh dấu đã accept
-      setAcceptedTestCases(prev => new Set([...prev, sId]))
-      
-      // Load lại test cases từ database
-      await loadDatabaseTestCases(sId)
-      
-      alert(`Đã lưu thành công ${testCases.test_cases.length} test cases vào database!`)
+      setScenariosWithTestCases(prev => {
+        const newSet = new Set(prev)
+        if (hasTestCases) {
+          newSet.add(sId)
+        } else {
+          newSet.delete(sId)
+        }
+        return newSet
+      })
+
+      return hasTestCases
     } catch (error) {
-      console.error("Error accepting test cases:", error)
-      alert("Có lỗi xảy ra khi lưu test cases. Vui lòng thử lại.")
-    } finally {
-      setIsAcceptingTC(null)
+      console.error("Error checking scenario test cases:", error)
+      return false
     }
   }
 
@@ -379,6 +401,376 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       newExpanded.add(tcId)
     }
     setExpandedTestCases(newExpanded)
+  }
+
+  const toggleGeneratedTestCaseExpansion = (tcId: string) => {
+    const newExpanded = new Set(expandedTestCases)
+    if (newExpanded.has(tcId)) {
+      newExpanded.delete(tcId)
+    } else {
+      newExpanded.add(tcId)
+    }
+    setExpandedTestCases(newExpanded)
+  }
+
+  const handleEditGeneratedTestCase = (sId: string, tcIndex: number) => {
+    const generatedData = generatedTestCases[sId]
+    if (!generatedData || !generatedData.test_cases[tcIndex]) return
+
+    const testCase = generatedData.test_cases[tcIndex]
+    const editKey = `${sId}-${tcIndex}`
+    
+    setEditingGeneratedTC(editKey)
+    setEditedGeneratedTCs(prev => ({
+      ...prev,
+      [editKey]: { ...testCase }
+    }))
+
+    // Initialize all steps in edit mode
+    const stepsEditData: Record<string, any> = {}
+    testCase.steps.forEach((step, stepIndex) => {
+      const stepKey = `${sId}-${tcIndex}-${stepIndex}`
+      stepsEditData[stepKey] = { ...step }
+    })
+    setEditedGeneratedSteps(prev => ({
+      ...prev,
+      ...stepsEditData
+    }))
+  }
+
+  const handleCancelEditGeneratedTC = (editKey: string) => {
+    setEditingGeneratedTC(null)
+    setEditedGeneratedTCs(prev => {
+      const newState = { ...prev }
+      delete newState[editKey]
+      return newState
+    })
+
+    // Clear all steps edit data for this test case
+    setEditedGeneratedSteps(prev => {
+      const newState = { ...prev }
+      Object.keys(newState).forEach(key => {
+        if (key.startsWith(editKey)) {
+          delete newState[key]
+        }
+      })
+      return newState
+    })
+  }
+
+  const handleSaveEditGeneratedTC = (sId: string, tcIndex: number) => {
+    const editKey = `${sId}-${tcIndex}`
+    const editedTC = editedGeneratedTCs[editKey]
+    if (!editedTC) return
+
+    setGeneratedTestCases(prev => {
+      const current = prev[sId]
+      if (!current) return prev
+
+      const newTestCases = [...current.test_cases]
+      const updatedSteps = newTestCases[tcIndex].steps.map((step, stepIndex) => {
+        const stepKey = `${sId}-${tcIndex}-${stepIndex}`
+        return editedGeneratedSteps[stepKey] || step
+      })
+      
+      newTestCases[tcIndex] = {
+        ...editedTC,
+        steps: updatedSteps
+      }
+
+      return {
+        ...prev,
+        [sId]: {
+          ...current,
+          test_cases: newTestCases
+        }
+      }
+    })
+
+    setEditingGeneratedTC(null)
+    setEditedGeneratedTCs(prev => {
+      const newState = { ...prev }
+      delete newState[editKey]
+      return newState
+    })
+
+    // Clear all steps edit data for this test case
+    setEditedGeneratedSteps(prev => {
+      const newState = { ...prev }
+      Object.keys(newState).forEach(key => {
+        if (key.startsWith(editKey)) {
+          delete newState[key]
+        }
+      })
+      return newState
+    })
+  }
+
+  const handleFieldChangeGeneratedTC = (editKey: string, field: keyof GeneratedTestCase, value: any) => {
+    setEditedGeneratedTCs(prev => ({
+      ...prev,
+      [editKey]: {
+        ...prev[editKey],
+        [field]: value
+      }
+    }))
+  }
+
+  const handleEditDatabaseTestCase = (tcId: number) => {
+    // Tìm test case trong tất cả scenarios
+    let foundTC: DatabaseTestCase | null = null
+    for (const sId in databaseTestCases) {
+      const tc = databaseTestCases[sId].find(tc => tc.id === tcId)
+      if (tc) {
+        foundTC = tc
+        break
+      }
+    }
+    
+    if (!foundTC) return
+
+    setEditingDatabaseTC(tcId)
+    setEditedDatabaseTCs(prev => ({
+      ...prev,
+      [tcId]: { ...foundTC }
+    }))
+
+    // Initialize all steps in edit mode
+    const stepsEditData: Record<string, any> = {}
+    if (foundTC.steps) {
+      foundTC.steps.forEach((step, stepIndex) => {
+        const stepKey = `${tcId}-${stepIndex}`
+        stepsEditData[stepKey] = { ...step }
+      })
+    }
+    setEditedDatabaseSteps(prev => ({
+      ...prev,
+      ...stepsEditData
+    }))
+  }
+
+  const handleCancelEditDatabaseTC = (tcId: number) => {
+    setEditingDatabaseTC(null)
+    setEditedDatabaseTCs(prev => {
+      const newState = { ...prev }
+      delete newState[tcId]
+      return newState
+    })
+
+    // Clear all steps edit data for this test case
+    setEditedDatabaseSteps(prev => {
+      const newState = { ...prev }
+      Object.keys(newState).forEach(key => {
+        if (key.startsWith(`${tcId}-`)) {
+          delete newState[key]
+        }
+      })
+      return newState
+    })
+  }
+
+  const handleSaveEditDatabaseTC = async (tcId: number) => {
+    const editedTC = editedDatabaseTCs[tcId]
+    if (!editedTC) return
+
+    try {
+      // Update test case
+      await updateTestCase(tcId, {
+        testItem: editedTC.testItem,
+        testClassification: editedTC.testClassification,
+        runConfig: editedTC.runConfig
+      })
+
+      try {
+        // Update all steps in database
+        const stepUpdatePromises: Promise<any>[] = []
+        Object.keys(editedDatabaseSteps).forEach(stepKey => {
+          if (stepKey.startsWith(`${tcId}-`)) {
+            const editedStep = editedDatabaseSteps[stepKey]
+            if (editedStep && editedStep.id) {
+              stepUpdatePromises.push(
+                updateTestCaseStep(editedStep.id, {
+                  stepOrder: editedStep.stepOrder,
+                  actionDescription: editedStep.actionDescription,
+                  inputData: editedStep.inputData,
+                  expectedOutput: editedStep.expectedOutput,
+                  scriptCode: editedStep.scriptCode || ""
+                })
+              )
+            }
+          }
+        })
+
+        // Wait for all step updates to complete
+        if (stepUpdatePromises.length > 0) {
+          await Promise.all(stepUpdatePromises)
+        }
+
+        // Update local state with all changes
+        setDatabaseTestCases(prev => {
+          const newState = { ...prev }
+          for (const sId in newState) {
+            const index = newState[sId].findIndex(tc => tc.id === tcId)
+            if (index !== -1) {
+              // Update test case
+              const updatedTC = { ...editedTC }
+              
+              // Update steps with edited data
+              if (updatedTC.steps) {
+                updatedTC.steps = updatedTC.steps.map((step, stepIndex) => {
+                  const stepKey = `${tcId}-${stepIndex}`
+                  return editedDatabaseSteps[stepKey] || step
+                })
+              }
+              
+              newState[sId][index] = updatedTC
+              break
+            }
+          }
+          return newState
+        })
+
+        setEditingDatabaseTC(null)
+        setEditedDatabaseTCs(prev => {
+          const newState = { ...prev }
+          delete newState[tcId]
+          return newState
+        })
+
+        // Clear all steps edit data for this test case
+        setEditedDatabaseSteps(prev => {
+          const newState = { ...prev }
+          Object.keys(newState).forEach(key => {
+            if (key.startsWith(`${tcId}-`)) {
+              delete newState[key]
+            }
+          })
+          return newState
+        })
+
+        alert("Đã cập nhật test case và tất cả steps thành công!")
+      } catch (stepError) {
+        console.error("Error updating steps:", stepError)
+        alert(`Có lỗi xảy ra khi cập nhật steps: ${stepError}`)
+      }
+    } catch (error) {
+      console.error("Error updating database test case:", error)
+      alert(`Có lỗi xảy ra khi cập nhật test case: ${error}`)
+    }
+  }
+
+  const handleFieldChangeDatabaseTC = (tcId: number, field: keyof DatabaseTestCase, value: any) => {
+    setEditedDatabaseTCs(prev => ({
+      ...prev,
+      [tcId]: {
+        ...prev[tcId],
+        [field]: value
+      }
+    }))
+  }
+
+
+  const handleFieldChangeGeneratedStep = (stepKey: string, field: string, value: any) => {
+    setEditedGeneratedSteps(prev => ({
+      ...prev,
+      [stepKey]: {
+        ...prev[stepKey],
+        [field]: value
+      }
+    }))
+  }
+
+
+  const handleFieldChangeDatabaseStep = (stepKey: string, field: string, value: any) => {
+    setEditedDatabaseSteps(prev => ({
+      ...prev,
+      [stepKey]: {
+        ...prev[stepKey],
+        [field]: value
+      }
+    }))
+  }
+
+  const handleDeleteGeneratedTestCase = (sId: string, tcIndex: number) => {
+    if (!confirm("Bạn có chắc chắn muốn xóa test case này?")) {
+      return
+    }
+
+    setGeneratedTestCases(prev => {
+      const current = prev[sId]
+      if (!current) return prev
+
+      const newTestCases = current.test_cases.filter((_, index) => index !== tcIndex)
+      
+      if (newTestCases.length === 0) {
+        // Nếu không còn test case nào, xóa luôn entry
+        const newState = { ...prev }
+        delete newState[sId]
+        return newState
+      }
+
+      return {
+        ...prev,
+        [sId]: {
+          ...current,
+          test_cases: newTestCases
+        }
+      }
+    })
+  }
+
+  const handleSaveGeneratedTestCaseToDB = async (scenarioId: number, tcIndex: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
+    if (!scenario || !scenario.id) return
+
+    const sId = scenario.S_id
+    const generatedData = generatedTestCases[sId]
+    if (!generatedData || !generatedData.test_cases[tcIndex]) return
+
+    const testCase = generatedData.test_cases[tcIndex]
+    const loadingKey = `${sId}-${tcIndex}`
+
+    setIsSavingGeneratedTC(loadingKey)
+    try {
+      // Lưu test case vào database
+      await createTestCaseWithSteps(scenario.id, [testCase])
+      
+      // Load lại database test cases để hiển thị
+      await loadDatabaseTestCases(sId)
+      
+      // Update scenarios with test cases
+      setScenariosWithTestCases(prev => new Set(prev).add(sId))
+      
+      // Xóa test case khỏi generated list
+      setGeneratedTestCases(prev => {
+        const current = prev[sId]
+        if (!current) return prev
+
+        const newTestCases = current.test_cases.filter((_, index) => index !== tcIndex)
+        
+        if (newTestCases.length === 0) {
+          // Nếu không còn test case nào, xóa luôn entry
+          const newState = { ...prev }
+          delete newState[sId]
+          return newState
+        }
+
+        return {
+          ...prev,
+          [sId]: {
+            ...current,
+            test_cases: newTestCases
+          }
+        }
+      })
+
+      alert("Đã lưu test case vào database thành công!")
+    } catch (error) {
+      console.error("Error saving generated test case to database:", error)
+      alert("Có lỗi xảy ra khi lưu test case. Vui lòng thử lại.")
+    } finally {
+      setIsSavingGeneratedTC(null)
+    }
   }
 
   const scenarios = scenariosState
@@ -642,40 +1034,218 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Generated TCs:</span>
                         <div className="flex-1">
-                          <div className="bg-gray-50 p-4 rounded-lg border">
-                            <div className="flex justify-between items-center mb-2">
-                              <span className="text-sm font-medium text-gray-600">
-                                {generatedTestCases[scenario.S_id].test_cases.length} test cases generated
-                              </span>
-                              {acceptedTestCases.has(scenario.S_id) ? (
-                                <Badge variant="default" className="bg-green-100 text-green-800">
-                                  <Check className="h-3 w-3 mr-1" />
-                                  Accepted
-                                </Badge>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleAcceptTestCases(scenario.id!)}
-                                  disabled={isAcceptingTC === scenario.S_id}
-                                  className="bg-green-600 hover:bg-green-700 text-white"
-                                >
-                                  {isAcceptingTC === scenario.S_id ? (
-                                    <>
-                                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                                      Saving...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Check className="h-3 w-3 mr-1" />
-                                      Accept
-                                    </>
+                          <div className="space-y-3">
+                            {generatedTestCases[scenario.S_id].test_cases.map((testCase, tcIndex) => {
+                              const editKey = `${scenario.S_id}-${tcIndex}`
+                              const isEditing = editingGeneratedTC === editKey
+                              const editedTC = editedGeneratedTCs[editKey] || testCase
+                              
+                              return (
+                              <Card key={`generated-${tcIndex}`} className="border-l-4 border-l-orange-500">
+                                <CardContent className="p-4">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <div className="flex items-center space-x-2">
+                                                {isEditing ? (
+                                                    <div className="flex items-center space-x-2">
+                                                        <span className="text-sm font-mono text-gray-500">{tcIndex + 1}.</span>
+                                                        <Textarea
+                                                            value={editedTC.test_item}
+                                                            onChange={(e) => handleFieldChangeGeneratedTC(editKey, 'test_item', e.target.value)}
+                                                            className="flex-1 min-h-[40px] resize-none"
+                                                            placeholder="Test item..."
+                                                            rows={1}
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    <h4 className="font-semibold text-gray-900">
+                                                        {tcIndex + 1}. {testCase.test_item}
+                                                    </h4>
+                                                )}
+                                                {isEditing ? (
+                                                    <Input
+                                                        value={editedTC.test_classification}
+                                                        onChange={(e) => handleFieldChangeGeneratedTC(editKey, 'test_classification', e.target.value)}
+                                                        className="px-2 py-1 border rounded text-sm w-32"
+                                                        placeholder="Classification..."
+                                                    />
+                                                ) : (
+                                                    <Badge 
+                                                        variant={testCase.test_classification === 'Positive' ? 'default' : 'secondary'}
+                                                        className={testCase.test_classification === 'Positive' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
+                                                    >
+                                                        {testCase.test_classification}
+                                                    </Badge>
+                                                )}
+                                    </div>
+                                    <div className="flex space-x-2">
+                                      {isEditing ? (
+                                        <>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleSaveEditGeneratedTC(scenario.S_id, tcIndex)}
+                                            className="text-green-600 hover:text-green-700"
+                                          >
+                                            <Save className="h-3 w-3 mr-1" />
+                                            Save
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleCancelEditGeneratedTC(editKey)}
+                                            className="text-gray-500 hover:text-gray-700"
+                                          >
+                                            <X className="h-3 w-3 mr-1" />
+                                            Cancel
+                                          </Button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleSaveGeneratedTestCaseToDB(scenario.id!, tcIndex)}
+                                            disabled={isSavingGeneratedTC === `${scenario.S_id}-${tcIndex}`}
+                                            className="bg-green-600 hover:bg-green-700 text-white"
+                                          >
+                                            {isSavingGeneratedTC === `${scenario.S_id}-${tcIndex}` ? (
+                                              <>
+                                                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                                                Saving...
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Check className="h-3 w-3 mr-1" />
+                                                Save
+                                              </>
+                                            )}
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleEditGeneratedTestCase(scenario.S_id, tcIndex)}
+                                            className="text-blue-600 hover:text-blue-700"
+                                          >
+                                            <Edit3 className="h-3 w-3 mr-1" />
+                                            Edit
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDeleteGeneratedTestCase(scenario.S_id, tcIndex)}
+                                            className="text-red-600 hover:text-red-700"
+                                          >
+                                            <Trash2 className="h-3 w-3 mr-1" />
+                                            Delete
+                                          </Button>
+                                        </>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => toggleGeneratedTestCaseExpansion(`${scenario.S_id}-generated-${tcIndex}`)}
+                                        className="text-gray-500 hover:text-gray-700"
+                                      >
+                                        {expandedTestCases.has(`${scenario.S_id}-generated-${tcIndex}`) ? 'Collapse' : 'Expand'}
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  
+                                  {expandedTestCases.has(`${scenario.S_id}-generated-${tcIndex}`) && (
+                                    <div className="space-y-2">
+                                      <div className="text-sm text-gray-600 mb-3">
+                                        <strong>Steps ({testCase.steps.length}):</strong>
+                                      </div>
+                                      {testCase.steps
+                                        .sort((a, b) => a.step_order - b.step_order)
+                                        .map((step, stepIndex) => {
+                                          const stepKey = `${scenario.S_id}-${tcIndex}-${stepIndex}`
+                                          const isEditingStep = isEditing
+                                          const editedStep = editedGeneratedSteps[stepKey] || step
+                                          
+                                          return (
+                                          <div key={stepIndex} className="bg-white p-3 rounded border">
+                                            <div className="flex items-start space-x-3">
+                                              <div className="flex-shrink-0 w-6 h-6 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center text-xs font-semibold">
+                                                {isEditingStep ? (
+                                                  <Input
+                                                    value={editedStep.step_order}
+                                                    onChange={(e) => handleFieldChangeGeneratedStep(stepKey, 'step_order', parseInt(e.target.value) || 1)}
+                                                    className="w-8 h-6 text-center text-xs p-0 border-0 bg-transparent"
+                                                    type="number"
+                                                    min="1"
+                                                  />
+                                                ) : (
+                                                  step.step_order
+                                                )}
+                                              </div>
+                                              <div className="flex-1 space-y-2">
+                                                <div>
+                                                  <span className="font-medium text-gray-900">Action:</span>
+                                                  {isEditingStep ? (
+                                                    <Textarea
+                                                      value={editedStep.action_description}
+                                                      onChange={(e) => handleFieldChangeGeneratedStep(stepKey, 'action_description', e.target.value)}
+                                                      className="mt-1"
+                                                      placeholder="Action description..."
+                                                      rows={2}
+                                                    />
+                                                  ) : (
+                                                    <p className="text-gray-700 mt-1">{step.action_description}</p>
+                                                  )}
+                                                </div>
+                                                <div>
+                                                  <span className="font-medium text-gray-900">Input Data:</span>
+                                                  {isEditingStep ? (
+                                                    <Textarea
+                                                      value={typeof editedStep.input_data === 'string' ? editedStep.input_data : JSON.stringify(editedStep.input_data)}
+                                                      onChange={(e) => {
+                                                        try {
+                                                          const parsed = JSON.parse(e.target.value)
+                                                          handleFieldChangeGeneratedStep(stepKey, 'input_data', parsed)
+                                                        } catch {
+                                                          handleFieldChangeGeneratedStep(stepKey, 'input_data', e.target.value)
+                                                        }
+                                                      }}
+                                                      className="mt-1 text-sm"
+                                                      placeholder="Input data (JSON format)..."
+                                                      rows={2}
+                                                    />
+                                                  ) : (
+                                                    step.input_data && Object.keys(step.input_data).length > 0 ? (
+                                                      <p className="text-gray-700 mt-1 text-sm bg-gray-50 p-2 rounded">
+                                                        {JSON.stringify(step.input_data)}
+                                                      </p>
+                                                    ) : (
+                                                      <p className="text-gray-500 mt-1 text-sm italic">No input data</p>
+                                                    )
+                                                  )}
+                                                </div>
+                                                <div>
+                                                  <span className="font-medium text-gray-900">Expected Output:</span>
+                                                  {isEditingStep ? (
+                                                    <Textarea
+                                                      value={editedStep.expected_output}
+                                                      onChange={(e) => handleFieldChangeGeneratedStep(stepKey, 'expected_output', e.target.value)}
+                                                      className="mt-1"
+                                                      placeholder="Expected output..."
+                                                      rows={2}
+                                                    />
+                                                  ) : (
+                                                    <p className="text-gray-700 mt-1">{step.expected_output}</p>
+                                                  )}
+                                                </div>
+                                              </div>
+                                            </div>
+                                          </div>
+                                          )
+                                        })}
+                                    </div>
                                   )}
-                                </Button>
-                              )}
-                            </div>
-                            <pre className="text-sm text-gray-700 whitespace-pre-wrap overflow-auto max-h-96">
-                              {JSON.stringify(generatedTestCases[scenario.S_id], null, 2)}
-                            </pre>
+                                </CardContent>
+                              </Card>
+                              )
+                            })}
                           </div>
                         </div>
                       </div>
@@ -689,29 +1259,91 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                         <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
                         <div className="flex-1">
                           <div className="space-y-3">
-                            {databaseTestCases[scenario.S_id].map((testCase, tcIndex) => (
+                            {databaseTestCases[scenario.S_id].map((testCase, tcIndex) => {
+                              const isEditing = editingDatabaseTC === testCase.id
+                              const editedTC = editedDatabaseTCs[testCase.id] || testCase
+                              
+                              return (
                               <Card key={testCase.id} className="border-l-4 border-l-blue-500">
                                 <CardContent className="p-4">
                                   <div className="flex items-center justify-between mb-3">
                                     <div className="flex items-center space-x-2">
-                                      <h4 className="font-semibold text-gray-900">
-                                        {tcIndex + 1}. {testCase.testItem}
-                                      </h4>
-                                      <Badge 
-                                        variant={testCase.testClassification === 'Positive' ? 'default' : 'secondary'}
-                                        className={testCase.testClassification === 'Positive' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
-                                      >
-                                        {testCase.testClassification}
-                                      </Badge>
+                                            {isEditing ? (
+                                                <div className="flex items-center space-x-2">
+                                                    <span className="text-sm font-mono text-gray-500">{tcIndex + 1}.</span>
+                                                    <Textarea
+                                                        value={editedTC.testItem}
+                                                        onChange={(e) => handleFieldChangeDatabaseTC(testCase.id, 'testItem', e.target.value)}
+                                                        className="flex-1 min-h-[40px] resize-none"
+                                                        placeholder="Test item..."
+                                                        rows={1}
+                                                    />
+                                                </div>
+                                            ) : (
+                                                <h4 className="font-semibold text-gray-900">
+                                                    {tcIndex + 1}. {testCase.testItem}
+                                                </h4>
+                                            )}
+                                            {isEditing ? (
+                                                <Input
+                                                    value={editedTC.testClassification}
+                                                    onChange={(e) => handleFieldChangeDatabaseTC(testCase.id, 'testClassification', e.target.value)}
+                                                    className="px-2 py-1 border rounded text-sm w-32"
+                                                    placeholder="Classification..."
+                                                />
+                                            ) : (
+                                                <Badge 
+                                                    variant={testCase.testClassification === 'Positive' ? 'default' : 'secondary'}
+                                                    className={testCase.testClassification === 'Positive' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}
+                                                >
+                                                    {testCase.testClassification}
+                                                </Badge>
+                                            )}
                                     </div>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => toggleTestCaseExpansion(`${scenario.S_id}-${testCase.id}`)}
-                                      className="text-gray-500 hover:text-gray-700"
-                                    >
-                                      {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) ? 'Collapse' : 'Expand'}
-                                    </Button>
+                                    <div className="flex space-x-2">
+                                      {isEditing ? (
+                                        <>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleSaveEditDatabaseTC(testCase.id)}
+                                            className="text-green-600 hover:text-green-700"
+                                          >
+                                            <Save className="h-3 w-3 mr-1" />
+                                            Save
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleCancelEditDatabaseTC(testCase.id)}
+                                            className="text-gray-500 hover:text-gray-700"
+                                          >
+                                            <X className="h-3 w-3 mr-1" />
+                                            Cancel
+                                          </Button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleEditDatabaseTestCase(testCase.id)}
+                                            className="text-blue-600 hover:text-blue-700"
+                                          >
+                                            <Edit3 className="h-3 w-3 mr-1" />
+                                            Edit
+                                          </Button>
+                                        </>
+                                      )}
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => toggleTestCaseExpansion(`${scenario.S_id}-${testCase.id}`)}
+                                        className="text-gray-500 hover:text-gray-700"
+                                      >
+                                        {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) ? 'Collapse' : 'Expand'}
+                                      </Button>
+                                    </div>
                                   </div>
                                   
                                   {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) && (
@@ -721,38 +1353,87 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                       </div>
                                       {testCase.steps
                                         .sort((a, b) => a.stepOrder - b.stepOrder)
-                                        .map((step, stepIndex) => (
-                                        <div key={step.id} className="bg-white p-3 rounded border">
-                                          <div className="flex items-start space-x-3">
-                                            <div className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">
-                                              {step.stepOrder}
-                                            </div>
-                                            <div className="flex-1 space-y-2">
-                                              <div>
-                                                <span className="font-medium text-gray-900">Action:</span>
-                                                <p className="text-gray-700 mt-1">{step.actionDescription}</p>
+                                        .map((step, stepIndex) => {
+                                          const stepKey = `${testCase.id}-${stepIndex}`
+                                          const isEditingStep = isEditing
+                                          const editedStep = editedDatabaseSteps[stepKey] || step
+                                          
+                                          return (
+                                          <div key={step.id} className="bg-white p-3 rounded border">
+                                            <div className="flex items-start space-x-3">
+                                              <div className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">
+                                                {isEditingStep ? (
+                                                  <Input
+                                                    value={editedStep.stepOrder}
+                                                    onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'stepOrder', parseInt(e.target.value) || 1)}
+                                                    className="w-8 h-6 text-center text-xs p-0 border-0 bg-transparent"
+                                                    type="number"
+                                                    min="1"
+                                                  />
+                                                ) : (
+                                                  step.stepOrder
+                                                )}
                                               </div>
-                                              {step.inputData && step.inputData !== '{}' && (
+                                              <div className="flex-1 space-y-2">
+                                                <div>
+                                                  <span className="font-medium text-gray-900">Action:</span>
+                                                  {isEditingStep ? (
+                                                    <Textarea
+                                                      value={editedStep.actionDescription}
+                                                      onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'actionDescription', e.target.value)}
+                                                      className="mt-1"
+                                                      placeholder="Action description..."
+                                                      rows={2}
+                                                    />
+                                                  ) : (
+                                                    <p className="text-gray-700 mt-1">{step.actionDescription}</p>
+                                                  )}
+                                                </div>
                                                 <div>
                                                   <span className="font-medium text-gray-900">Input Data:</span>
-                                                  <p className="text-gray-700 mt-1 text-sm bg-gray-50 p-2 rounded">
-                                                    {step.inputData}
-                                                  </p>
+                                                  {isEditingStep ? (
+                                                    <Textarea
+                                                      value={editedStep.inputData}
+                                                      onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'inputData', e.target.value)}
+                                                      className="mt-1 text-sm"
+                                                      placeholder="Input data..."
+                                                      rows={2}
+                                                    />
+                                                  ) : (
+                                                    step.inputData && step.inputData !== '{}' ? (
+                                                      <p className="text-gray-700 mt-1 text-sm bg-gray-50 p-2 rounded">
+                                                        {step.inputData}
+                                                      </p>
+                                                    ) : (
+                                                      <p className="text-gray-500 mt-1 text-sm italic">No input data</p>
+                                                    )
+                                                  )}
                                                 </div>
-                                              )}
-                                              <div>
-                                                <span className="font-medium text-gray-900">Expected Output:</span>
-                                                <p className="text-gray-700 mt-1">{step.expectedOutput}</p>
+                                                <div>
+                                                  <span className="font-medium text-gray-900">Expected Output:</span>
+                                                  {isEditingStep ? (
+                                                    <Textarea
+                                                      value={editedStep.expectedOutput}
+                                                      onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'expectedOutput', e.target.value)}
+                                                      className="mt-1"
+                                                      placeholder="Expected output..."
+                                                      rows={2}
+                                                    />
+                                                  ) : (
+                                                    <p className="text-gray-700 mt-1">{step.expectedOutput}</p>
+                                                  )}
+                                                </div>
                                               </div>
                                             </div>
                                           </div>
-                                        </div>
-                                      ))}
+                                          )
+                                        })}
                                     </div>
                                   )}
                                 </CardContent>
                               </Card>
-                            ))}
+                              )
+                            })}
                           </div>
                         </div>
                       </div>
@@ -760,7 +1441,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                   )}
 
                   {/* Load Database Test Cases Button */}
-                  {!databaseTestCases[scenario.S_id] && scenario.id && (
+                  {!databaseTestCases[scenario.S_id] && scenario.id && scenariosWithTestCases.has(scenario.S_id) && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>

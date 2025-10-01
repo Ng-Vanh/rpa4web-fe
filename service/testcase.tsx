@@ -148,4 +148,20 @@ const getTestCasesWithSteps = async (scenarioId: number) => {
     }
 }
 
-export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps };
+const updateTestCase = async (tcId: number, data: any) => {
+    try {
+        const response = await axios.patch(`${API_BASE_URL}/test-cases/${tcId}`, data, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders(),
+            },
+        });
+        console.log('Updated test case:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error updating test case:", error);
+        throw error;
+    }
+}
+
+export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase };
