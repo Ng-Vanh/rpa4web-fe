@@ -51,7 +51,7 @@ import {
   generateAllTestScripts,
   getTestScript,
 } from "@/service/gen-script";
-import { executeStep, getExecutionSteps } from "@/service/testcase-step";
+import { executeStep, getExecutionSteps, checkScore } from "@/service/testcase-step";
 import { IconExpandButton } from "./ui/icon-expand-button";
 
 
