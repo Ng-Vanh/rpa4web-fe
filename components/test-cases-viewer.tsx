@@ -269,6 +269,27 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         console.log("Scenario deleted successfully")
         // Cập nhật danh sách cục bộ, không reload trang
         setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
+        // Dọn dẹp các state liên quan để tránh trùng/lưu vết trên UI
+        setExpandedCases(prev => {
+          const next = new Set(prev)
+          next.delete(scenario.S_id)
+          return next
+        })
+        setGeneratedTestCases(prev => {
+          const next = { ...prev }
+          delete next[scenario.S_id]
+          return next
+        })
+        setDatabaseTestCases(prev => {
+          const next = { ...prev }
+          delete next[scenario.S_id]
+          return next
+        })
+        setAcceptedTestCases(prev => {
+          const next = new Set(prev)
+          next.delete(scenario.S_id)
+          return next
+        })
         // Nếu đang edit item vừa bị xóa, thoát edit mode
         if (editingScenario === scenarioId) {
           setEditingScenario(null)
@@ -432,7 +453,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
             const editedScenario = scenario.id ? editedScenarios[scenario.id] || scenario : scenario
             
             return (
-              <Card key={scenario.S_id} className="hover:shadow-md transition-shadow">
+              <Card key={scenario.id ?? scenario.S_id} className="hover:shadow-md transition-shadow">
                 <CardContent className="p-6">
                   {/* Header với S_id: Title (UC_id: "") */}
                   <div className="flex items-start justify-between mb-4">
@@ -502,7 +523,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleDelete(scenario.id!)}
-                            disabled={isDeleting === scenario.S_id}
+                            disabled={isDeleting === String(scenario.id)}
                             className="text-red-600 hover:text-red-700"
                           >
                             <Trash2 className="h-4 w-4 mr-1" />
