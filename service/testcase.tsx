@@ -164,4 +164,20 @@ const updateTestCase = async (tcId: number, data: any) => {
     }
 }
 
-export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase };
+const deleteTestCase = async (tcId: number) => {
+    try {
+        const response = await axios.delete(`${API_BASE_URL}/test-cases/${tcId}`, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders(),
+            },
+        });
+        console.log('Deleted test case:', tcId);
+        return response.data;
+    } catch (error) {
+        console.error("Error deleting test case:", error);
+        throw error;
+    }
+}
+
+export { getAllTestCases, getTestCaseById, createTestCase, generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase, deleteTestCase };

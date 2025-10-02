@@ -7,8 +7,8 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check } from "lucide-react"
-import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase } from "@/service/testcase"
-import { updateTestCaseStep } from "@/service/testcase-step"
+import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase, deleteTestCase } from "@/service/testcase"
+import { updateTestCaseStep, deleteTestCaseStep } from "@/service/testcase-step"
 import { getAuthHeaders } from "@/service/auth-utils"
 
 interface Scenario {
@@ -275,21 +275,47 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     if (!scenario || !scenario.id) return
 
     // Xác nhận trước khi xóa
-    if (!confirm(`Bạn có chắc chắn muốn xóa scenario "${scenario.Title}"?`)) {
+    if (!confirm(`Bạn có chắc chắn muốn xóa scenario "${scenario.Title}" và tất cả test cases liên quan?`)) {
       return
     }
 
     setIsDeleting(scenarioId.toString())
     try {
+      // Bước 1: Xóa tất cả test case steps trước
+      const testCases = await getTestCasesWithSteps(scenario.id)
+      for (const testCase of testCases) {
+        if (testCase.steps && testCase.steps.length > 0) {
+          for (const step of testCase.steps) {
+            try {
+              await deleteTestCaseStep(step.id)
+            } catch (stepError) {
+              console.error(`Error deleting step ${step.id}:`, stepError)
+            }
+          }
+        }
+      }
+
+      // Bước 2: Xóa tất cả test cases
+      for (const testCase of testCases) {
+        try {
+          await deleteTestCase(testCase.id)
+        } catch (tcError) {
+          console.error(`Error deleting test case ${testCase.id}:`, tcError)
+        }
+      }
+
+      // Bước 3: Xóa scenario
+      const authHeaders = getAuthHeaders()
       const response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/${scenario.id}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
-        }
+          ...authHeaders,
+        } as HeadersInit
       })
 
       if (response.ok) {
-        console.log("Scenario deleted successfully")
+        console.log("Scenario and all related test cases deleted successfully")
         // Cập nhật danh sách cục bộ, không reload trang
         setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
         // Dọn dẹp các state liên quan để tránh trùng/lưu vết trên UI
@@ -308,11 +334,16 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
           delete next[scenario.S_id]
           return next
         })
+        setScenariosWithTestCases(prev => {
+          const next = new Set(prev)
+          next.delete(scenario.S_id)
+          return next
+        })
         // Nếu đang edit item vừa bị xóa, thoát edit mode
         if (editingScenario === scenarioId) {
           setEditingScenario(null)
         }
-        // Có thể thêm toast notification ở đây
+        alert("Đã xóa scenario và tất cả test cases liên quan thành công!")
       } else {
         console.error("Failed to delete scenario:", response.statusText)
         alert("Không thể xóa scenario. Vui lòng thử lại.")
@@ -689,6 +720,71 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         [field]: value
       }
     }))
+  }
+
+  const handleDeleteDatabaseTestCase = async (tcId: number) => {
+    // Tìm test case trong tất cả scenarios
+    let foundTC: DatabaseTestCase | null = null
+    let foundSId: string | null = null
+    for (const sId in databaseTestCases) {
+      const tc = databaseTestCases[sId].find(tc => tc.id === tcId)
+      if (tc) {
+        foundTC = tc
+        foundSId = sId
+        break
+      }
+    }
+    
+    if (!foundTC || !foundSId) return
+
+    // Xác nhận trước khi xóa
+    if (!confirm(`Bạn có chắc chắn muốn xóa test case "${foundTC.testItem}"?`)) {
+      return
+    }
+
+    try {
+      // Bước 1: Xóa tất cả test case steps trước
+      if (foundTC.steps && foundTC.steps.length > 0) {
+        for (const step of foundTC.steps) {
+          try {
+            await deleteTestCaseStep(step.id)
+          } catch (stepError) {
+            console.error(`Error deleting step ${step.id}:`, stepError)
+          }
+        }
+      }
+
+      // Bước 2: Xóa test case
+      await deleteTestCase(tcId)
+
+      // Bước 3: Cập nhật local state
+      setDatabaseTestCases(prev => {
+        const newState = { ...prev }
+        if (newState[foundSId!]) {
+          newState[foundSId!] = newState[foundSId!].filter(tc => tc.id !== tcId)
+          // Nếu không còn test case nào, xóa luôn entry
+          if (newState[foundSId!].length === 0) {
+            delete newState[foundSId!]
+          }
+        }
+        return newState
+      })
+
+      // Bước 4: Cập nhật scenariosWithTestCases state
+      setScenariosWithTestCases(prev => {
+        const newSet = new Set(prev)
+        const remainingTestCases = databaseTestCases[foundSId!]?.filter(tc => tc.id !== tcId)
+        if (!remainingTestCases || remainingTestCases.length === 0) {
+          newSet.delete(foundSId!)
+        }
+        return newSet
+      })
+
+      alert("Đã xóa test case và tất cả steps liên quan thành công!")
+    } catch (error) {
+      console.error("Error deleting database test case:", error)
+      alert("Có lỗi xảy ra khi xóa test case. Vui lòng thử lại.")
+    }
   }
 
   const handleDeleteGeneratedTestCase = (sId: string, tcIndex: number) => {
@@ -1332,6 +1428,15 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                           >
                                             <Edit3 className="h-3 w-3 mr-1" />
                                             Edit
+                                          </Button>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => handleDeleteDatabaseTestCase(testCase.id)}
+                                            className="text-red-600 hover:text-red-700"
+                                          >
+                                            <Trash2 className="h-3 w-3 mr-1" />
+                                            Delete
                                           </Button>
                                         </>
                                       )}
