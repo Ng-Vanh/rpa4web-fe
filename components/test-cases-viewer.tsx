@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check } from "lucide-react"
+import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check, Plus } from "lucide-react"
 import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase, deleteTestCase } from "@/service/testcase"
 import { updateTestCaseStep, deleteTestCaseStep, createNewTestCaseStep } from "@/service/testcase-step"
 import { getAuthHeaders } from "@/service/auth-utils"
@@ -66,11 +66,13 @@ interface TestCasesViewerProps {
     scenarios?: Scenario[]
   }
   onBack?: () => void
+  srsId?: number
 }
 
-export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
+export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const [showTestData, setShowTestData] = useState(false)
   const [isGeneratingAll, setIsGeneratingAll] = useState(false)
+  const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 })
   const [expandedCases, setExpandedCases] = useState<Set<string>>(new Set())
   const [editingScenario, setEditingScenario] = useState<number | null>(null)
   const [editedScenarios, setEditedScenarios] = useState<Record<number, Scenario>>({})
@@ -99,9 +101,10 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   // Check scenarios có test case hay không khi scenarios thay đổi
   useEffect(() => {
     const checkAllScenarios = async () => {
-      for (const scenario of scenariosState) {
-        if (scenario.S_id && scenario.id) {
-          await checkScenarioHasTestCases(scenario.S_id)
+      for (let i = 0; i < scenariosState.length; i++) {
+        const scenario = scenariosState[i]
+        if (scenario.id) {
+          await checkScenarioHasTestCases(String(i))
         }
       }
     }
@@ -111,12 +114,13 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }, [scenariosState])
 
-  const toggleTestCase = (sId: string) => {
+  const toggleTestCase = (index: number) => {
     const newExpanded = new Set(expandedCases)
-    if (newExpanded.has(sId)) {
-      newExpanded.delete(sId)
+    const indexStr = String(index)
+    if (newExpanded.has(indexStr)) {
+      newExpanded.delete(indexStr)
     } else {
-      newExpanded.add(sId)
+      newExpanded.add(indexStr)
     }
     setExpandedCases(newExpanded)
   }
@@ -137,18 +141,49 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     URL.revokeObjectURL(url)
   }
 
-  const toggleAllTestData = () => {
-    // Nếu đang hiển thị rồi thì ẩn ngay lập tức
-    if (showTestData) {
-      setShowTestData(false)
-      return
-    }
-    // Chưa hiển thị: mô phỏng generate 4 giây rồi mới hiện
+  const generateAllTestCasesSequentially = async () => {
+    if (isGeneratingAll) return // Prevent multiple calls
+    
     setIsGeneratingAll(true)
-    setTimeout(() => {
-      setShowTestData(true)
+    setGeneratingProgress({ current: 0, total: 0 })
+    
+    try {
+      // Lấy danh sách scenarios có ID (đã lưu trong database)
+      const scenariosWithId = scenarios.filter(scenario => scenario.id && scenario.id > 0)
+      
+      if (scenariosWithId.length === 0) {
+        alert("Không có scenario nào để generate test cases!")
+        return
+      }
+      
+      setGeneratingProgress({ current: 0, total: scenariosWithId.length })
+      
+      // Lần lượt generate test cases cho từng scenario
+      for (let i = 0; i < scenariosWithId.length; i++) {
+        const scenario = scenariosWithId[i]
+        if (scenario.id) {
+          console.log(`Generating test cases for scenario ${i + 1}/${scenariosWithId.length}: ${scenario.Title}`)
+          setGeneratingProgress({ current: i + 1, total: scenariosWithId.length })
+          
+          await handleGenerateTestCases(scenario.id)
+          
+          // Đợi một chút trước khi chuyển sang scenario tiếp theo
+          if (i < scenariosWithId.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000)) // 1 giây delay
+          }
+        }
+      }
+      
+      console.log("All test cases generated successfully!")
+      alert(`Đã generate test cases cho ${scenariosWithId.length} scenarios thành công!`)
+      
+    } catch (error) {
+      console.error("Error generating all test cases:", error)
+      alert("Có lỗi xảy ra khi generate test cases. Vui lòng thử lại.")
+    } finally {
       setIsGeneratingAll(false)
-    }, 4000)
+      setGeneratingProgress({ current: 0, total: 0 })
+    }
   }
 
   const handleEdit = (scenarioId: number) => {
@@ -163,6 +198,14 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   }
 
   const handleCancelEdit = (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
+    const isNewScenario = scenario && scenario.id && scenario.id < 0
+    
+    if (isNewScenario) {
+      // Nếu là scenario mới, xóa luôn khỏi danh sách
+      setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
+    }
+    
     setEditingScenario(null)
     setEditedScenarios(prev => {
       const newState = { ...prev }
@@ -237,34 +280,69 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
 
     setIsSaving(true)
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/${editedScenario.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          title: editedScenario.Title,
-          description: JSON.stringify(editedScenario),
-          webUrl: ""
+      // Kiểm tra nếu là scenario mới (ID âm)
+      const isNewScenario = editedScenario.id < 0
+      
+      let response
+      if (isNewScenario) {
+        // Tạo scenario mới
+        response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          } as HeadersInit,
+          body: JSON.stringify({
+            title: editedScenario.Title,
+            description: JSON.stringify(editedScenario),
+            webUrl: "",
+            srsId: srsId // Cần srsId để liên kết scenario với SRS
+          })
         })
-      })
+      } else {
+        // Cập nhật scenario hiện có
+        response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/${editedScenario.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...getAuthHeaders(),
+          } as HeadersInit,
+          body: JSON.stringify({
+            title: editedScenario.Title,
+            description: JSON.stringify(editedScenario),
+            webUrl: ""
+          })
+        })
+      }
 
       if (response.ok) {
-        console.log("Scenario updated successfully")
+        const result = await response.json()
+        console.log(isNewScenario ? "Scenario created successfully" : "Scenario updated successfully")
+        
         setEditingScenario(null)
         setEditedScenarios(prev => {
           const newState = { ...prev }
           delete newState[scenarioId]
           return newState
         })
-        // Cập nhật state cục bộ với data đã edit
-        setScenariosState(prev => prev.map(s => s.id === scenarioId ? editedScenario : s))
-        // Có thể thêm toast notification ở đây
+        
+        if (isNewScenario) {
+          // Cập nhật scenario mới với ID thật từ database
+          const updatedScenario = { ...editedScenario, id: result.id }
+          setScenariosState(prev => prev.map(s => s.id === scenarioId ? updatedScenario : s))
+        } else {
+          // Cập nhật state cục bộ với data đã edit
+          setScenariosState(prev => prev.map(s => s.id === scenarioId ? editedScenario : s))
+        }
+        
+        alert(isNewScenario ? "Đã tạo scenario mới thành công!" : "Đã cập nhật scenario thành công!")
       } else {
-        console.error("Failed to update scenario:", response.statusText)
+        console.error("Failed to save scenario:", response.statusText)
+        alert("Có lỗi xảy ra khi lưu scenario. Vui lòng thử lại.")
       }
     } catch (error) {
-      console.error("Error updating scenario:", error)
+      console.error("Error saving scenario:", error)
+      alert("Có lỗi xảy ra khi lưu scenario. Vui lòng thử lại.")
     } finally {
       setIsSaving(false)
     }
@@ -281,6 +359,22 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
 
     setIsDeleting(scenarioId.toString())
     try {
+      // Kiểm tra nếu là scenario mới (ID âm) - chưa lưu vào database
+      const isNewScenario = scenario.id < 0
+      
+      if (isNewScenario) {
+        // Chỉ xóa khỏi local state
+        setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
+        setEditingScenario(null)
+        setEditedScenarios(prev => {
+          const newState = { ...prev }
+          delete newState[scenarioId]
+          return newState
+        })
+        alert("Đã xóa scenario thành công!")
+        return
+      }
+
       // Bước 1: Xóa tất cả test case steps trước
       const testCases = await getTestCasesWithSteps(scenario.id)
       for (const testCase of testCases) {
@@ -360,13 +454,14 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario) return
 
-    const sId = scenario.S_id // Sử dụng S_id làm key cho generatedTestCases
-    setIsGeneratingTC(sId)
+    const scenarioIndex = scenarios.findIndex(s => s.id === scenarioId)
+    const indexKey = String(scenarioIndex) // Sử dụng index làm key
+    setIsGeneratingTC(indexKey)
     try {
       const result = await generateTestCases(scenario)
       setGeneratedTestCases(prev => ({
         ...prev,
-        [sId]: result
+        [indexKey]: result
       }))
     } catch (error) {
       console.error("Error generating test cases:", error)
@@ -377,11 +472,12 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
   }
 
 
-  const checkScenarioHasTestCases = async (sId: string) => {
-    if (!sId) return false
+  const checkScenarioHasTestCases = async (indexKey: string) => {
+    if (!indexKey) return false
 
     try {
-      const scenario = scenarios.find(s => s.S_id === sId)
+      const scenarioIndex = parseInt(indexKey)
+      const scenario = scenarios[scenarioIndex]
       if (!scenario || !scenario.id) {
         return false
       }
@@ -392,9 +488,9 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       setScenariosWithTestCases(prev => {
         const newSet = new Set(prev)
         if (hasTestCases) {
-          newSet.add(sId)
+          newSet.add(indexKey)
         } else {
-          newSet.delete(sId)
+          newSet.delete(indexKey)
         }
         return newSet
       })
@@ -406,16 +502,17 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     }
   }
 
-  const loadDatabaseTestCases = async (sId: string) => {
-    const scenario = scenarios.find(s => s.S_id === sId)
+  const loadDatabaseTestCases = async (indexKey: string) => {
+    const scenarioIndex = parseInt(indexKey)
+    const scenario = scenarios[scenarioIndex]
     if (!scenario || !scenario.id) return
 
-    setIsLoadingDatabaseTC(sId)
+    setIsLoadingDatabaseTC(indexKey)
     try {
       const testCases = await getTestCasesWithSteps(scenario.id)
       setDatabaseTestCases(prev => ({
         ...prev,
-        [sId]: testCases
+        [indexKey]: testCases
       }))
     } catch (error) {
       console.error("Error loading database test cases:", error)
@@ -444,12 +541,12 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     setExpandedTestCases(newExpanded)
   }
 
-  const handleEditGeneratedTestCase = (sId: string, tcIndex: number) => {
-    const generatedData = generatedTestCases[sId]
+  const handleEditGeneratedTestCase = (indexKey: string, tcIndex: number) => {
+    const generatedData = generatedTestCases[indexKey]
     if (!generatedData || !generatedData.test_cases[tcIndex]) return
 
     const testCase = generatedData.test_cases[tcIndex]
-    const editKey = `${sId}-${tcIndex}`
+    const editKey = `${indexKey}-${tcIndex}`
     
     setEditingGeneratedTC(editKey)
     setEditedGeneratedTCs(prev => ({
@@ -460,7 +557,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     // Initialize all steps in edit mode
     const stepsEditData: Record<string, any> = {}
     testCase.steps.forEach((step, stepIndex) => {
-      const stepKey = `${sId}-${tcIndex}-${stepIndex}`
+      const stepKey = `${indexKey}-${tcIndex}-${stepIndex}`
       stepsEditData[stepKey] = { ...step }
     })
     setEditedGeneratedSteps(prev => ({
@@ -489,18 +586,18 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     })
   }
 
-  const handleSaveEditGeneratedTC = (sId: string, tcIndex: number) => {
-    const editKey = `${sId}-${tcIndex}`
+  const handleSaveEditGeneratedTC = (indexKey: string, tcIndex: number) => {
+    const editKey = `${indexKey}-${tcIndex}`
     const editedTC = editedGeneratedTCs[editKey]
     if (!editedTC) return
 
     setGeneratedTestCases(prev => {
-      const current = prev[sId]
+      const current = prev[indexKey]
       if (!current) return prev
 
       const newTestCases = [...current.test_cases]
       const updatedSteps = newTestCases[tcIndex].steps.map((step, stepIndex) => {
-        const stepKey = `${sId}-${tcIndex}-${stepIndex}`
+        const stepKey = `${indexKey}-${tcIndex}-${stepIndex}`
         return editedGeneratedSteps[stepKey] || step
       })
       
@@ -511,7 +608,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
 
       return {
         ...prev,
-        [sId]: {
+        [indexKey]: {
           ...current,
           test_cases: newTestCases
         }
@@ -946,13 +1043,13 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     })
   }
 
-  const handleDeleteGeneratedTestCase = (sId: string, tcIndex: number) => {
+  const handleDeleteGeneratedTestCase = (indexKey: string, tcIndex: number) => {
     if (!confirm("Bạn có chắc chắn muốn xóa test case này?")) {
       return
     }
 
     setGeneratedTestCases(prev => {
-      const current = prev[sId]
+      const current = prev[indexKey]
       if (!current) return prev
 
       const newTestCases = current.test_cases.filter((_, index) => index !== tcIndex)
@@ -960,13 +1057,13 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       if (newTestCases.length === 0) {
         // Nếu không còn test case nào, xóa luôn entry
         const newState = { ...prev }
-        delete newState[sId]
+        delete newState[indexKey]
         return newState
       }
 
       return {
         ...prev,
-        [sId]: {
+        [indexKey]: {
           ...current,
           test_cases: newTestCases
         }
@@ -978,12 +1075,13 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario || !scenario.id) return
 
-    const sId = scenario.S_id
-    const generatedData = generatedTestCases[sId]
+    const scenarioIndex = scenarios.findIndex(s => s.id === scenarioId)
+    const indexKey = String(scenarioIndex)
+    const generatedData = generatedTestCases[indexKey]
     if (!generatedData || !generatedData.test_cases[tcIndex]) return
 
     const testCase = generatedData.test_cases[tcIndex]
-    const loadingKey = `${sId}-${tcIndex}`
+    const loadingKey = `${indexKey}-${tcIndex}`
 
     setIsSavingGeneratedTC(loadingKey)
     try {
@@ -991,14 +1089,14 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       await createTestCaseWithSteps(scenario.id, [testCase])
       
       // Load lại database test cases để hiển thị
-      await loadDatabaseTestCases(sId)
+      await loadDatabaseTestCases(indexKey)
       
       // Update scenarios with test cases
-      setScenariosWithTestCases(prev => new Set(prev).add(sId))
+      setScenariosWithTestCases(prev => new Set(prev).add(indexKey))
       
       // Xóa test case khỏi generated list
       setGeneratedTestCases(prev => {
-        const current = prev[sId]
+        const current = prev[indexKey]
         if (!current) return prev
 
         const newTestCases = current.test_cases.filter((_, index) => index !== tcIndex)
@@ -1006,13 +1104,13 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         if (newTestCases.length === 0) {
           // Nếu không còn test case nào, xóa luôn entry
           const newState = { ...prev }
-          delete newState[sId]
+          delete newState[indexKey]
           return newState
         }
 
         return {
           ...prev,
-          [sId]: {
+          [indexKey]: {
             ...current,
             test_cases: newTestCases
           }
@@ -1026,6 +1124,30 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
     } finally {
       setIsSavingGeneratedTC(null)
     }
+  }
+
+  const handleAddScenario = () => {
+    // Tạo scenario mới với ID tạm thời
+    const newScenario: Scenario = {
+      UC_id: "UC_NEW",
+      S_id: "NEW", // Đơn giản hóa
+      "Title": "New Scenario",
+      Precondition: "Enter precondition here...",
+      Steps: ["Step 1: Enter action here..."],
+      "Expected Result": "Enter expected result here...",
+      s_id: "NEW", // Đơn giản hóa
+      id: -Date.now() // ID tạm thời (số âm để phân biệt)
+    }
+
+    // Thêm vào state và tự động edit
+    setScenariosState(prev => [...prev, newScenario])
+    setEditingScenario(newScenario.id!)
+    
+    // Khởi tạo edited scenario
+    setEditedScenarios(prev => ({
+      ...prev,
+      [newScenario.id!]: { ...newScenario }
+    }))
   }
 
   const scenarios = scenariosState
@@ -1045,20 +1167,21 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={toggleAllTestData}
+              onClick={generateAllTestCasesSequentially}
               disabled={isGeneratingAll}
-              className={showTestData ? "bg-blue-50 border-blue-200" : ""}
+              className="bg-blue-50 border-blue-200"
             >
-              {showTestData ? (
+              {isGeneratingAll ? (
                 <>
-                  <EyeOff className="h-4 w-4 mr-2" />
-                  Hide Test Data
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {generatingProgress.total > 0 
+                    ? `Generating ${generatingProgress.current}/${generatingProgress.total}...`
+                    : "Generating All TCs..."
+                  }
                 </>
-              ) : isGeneratingAll ? (
-                <>Generating...</>
               ) : (
                 <>
-                  <Eye className="h-4 w-4 mr-2" />
+                  <Play className="h-4 w-4 mr-2" />
                   Generate All TCs
                 </>
               )}
@@ -1095,7 +1218,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
 
         <div className="space-y-6">
           {scenarios.map((scenario, index) => {
-            const isExpanded = expandedCases.has(scenario.S_id)
+            const isExpanded = expandedCases.has(String(index))
             const isEditing = editingScenario === scenario.id
             const editedScenario = scenario.id ? editedScenarios[scenario.id] || scenario : scenario
             
@@ -1109,7 +1232,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                         {isEditing ? (
                           <div className="flex-1 space-y-2">
                             <div className="flex items-center space-x-2">
-                              <span className="font-mono text-blue-600">{scenario.s_id}:</span>
+                              <span className="font-mono text-blue-600">{index + 1}.</span>
                               <Input
                                 value={editedScenario["Title"]}
                                 onChange={(e) => handleFieldChange(scenario.id!, "Title", e.target.value)}
@@ -1127,7 +1250,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           </div>
                         ) : (
                           <h3 className="text-lg font-semibold text-gray-900">
-                            <span className="font-mono text-blue-600">{scenario.s_id}:</span> {scenario["Title"]} <span className="text-gray-500 text-sm">({scenario.UC_id})</span>
+                            <span className="font-mono text-blue-600">{index + 1}.</span> {scenario["Title"]} <span className="text-gray-500 text-sm">({scenario.UC_id})</span>
                           </h3>
                         )}
                       </div>
@@ -1174,16 +1297,16 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                             className="text-red-600 hover:text-red-700"
                           >
                             <Trash2 className="h-4 w-4 mr-1" />
-                            {isDeleting === scenario.S_id ? "Deleting..." : "Delete"}
+                            {isDeleting === String(scenario.id) ? "Deleting..." : "Delete"}
                           </Button>
                           <Button
                             variant="ghost"
                             size="sm"
                             onClick={() => handleGenerateTestCases(scenario.id!)}
-                            disabled={isGeneratingTC === scenario.S_id}
+                            disabled={isGeneratingTC === String(index)}
                             className="text-gray-500 hover:text-gray-700"
                           >
-                            {isGeneratingTC === scenario.S_id ? (
+                            {isGeneratingTC === String(index) ? (
                               <>
                                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                                 Generating...
@@ -1284,14 +1407,14 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                   </div>
 
                   {/* Generated Test Cases */}
-                  {generatedTestCases[scenario.S_id] && (
+                  {generatedTestCases[String(index)] && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Generated TCs:</span>
                         <div className="flex-1">
                           <div className="space-y-3">
-                            {generatedTestCases[scenario.S_id].test_cases.map((testCase, tcIndex) => {
-                              const editKey = `${scenario.S_id}-${tcIndex}`
+                            {generatedTestCases[String(index)].test_cases.map((testCase, tcIndex) => {
+                              const editKey = `${index}-${tcIndex}`
                               const isEditing = editingGeneratedTC === editKey
                               const editedTC = editedGeneratedTCs[editKey] || testCase
                               
@@ -1338,7 +1461,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleSaveEditGeneratedTC(scenario.S_id, tcIndex)}
+                                            onClick={() => handleSaveEditGeneratedTC(String(index), tcIndex)}
                                             className="text-green-600 hover:text-green-700"
                                           >
                                             <Save className="h-3 w-3 mr-1" />
@@ -1360,10 +1483,10 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleSaveGeneratedTestCaseToDB(scenario.id!, tcIndex)}
-                                            disabled={isSavingGeneratedTC === `${scenario.S_id}-${tcIndex}`}
+                                            disabled={isSavingGeneratedTC === `${index}-${tcIndex}`}
                                             className="bg-green-600 hover:bg-green-700 text-white"
                                           >
-                                            {isSavingGeneratedTC === `${scenario.S_id}-${tcIndex}` ? (
+                                            {isSavingGeneratedTC === `${index}-${tcIndex}` ? (
                                               <>
                                                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                                                 Saving...
@@ -1378,16 +1501,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleEditGeneratedTestCase(scenario.S_id, tcIndex)}
-                                            className="text-blue-600 hover:text-blue-700"
-                                          >
-                                            <Edit3 className="h-3 w-3 mr-1" />
-                                            Edit
-                                          </Button>
-                                          <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => handleDeleteGeneratedTestCase(scenario.S_id, tcIndex)}
+                                            onClick={() => handleDeleteGeneratedTestCase(String(index), tcIndex)}
                                             className="text-red-600 hover:text-red-700"
                                           >
                                             <Trash2 className="h-3 w-3 mr-1" />
@@ -1398,15 +1512,15 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => toggleGeneratedTestCaseExpansion(`${scenario.S_id}-generated-${tcIndex}`)}
+                                        onClick={() => toggleGeneratedTestCaseExpansion(`${index}-generated-${tcIndex}`)}
                                         className="text-gray-500 hover:text-gray-700"
                                       >
-                                        {expandedTestCases.has(`${scenario.S_id}-generated-${tcIndex}`) ? 'Collapse' : 'Expand'}
+                                        {expandedTestCases.has(`${index}-generated-${tcIndex}`) ? 'Collapse' : 'Expand'}
                                       </Button>
                                     </div>
                                   </div>
                                   
-                                  {expandedTestCases.has(`${scenario.S_id}-generated-${tcIndex}`) && (
+                                  {expandedTestCases.has(`${index}-generated-${tcIndex}`) && (
                                     <div className="space-y-2">
                                       <div className="text-sm text-gray-600 mb-3">
                                         <strong>Steps ({testCase.steps.length}):</strong>
@@ -1508,13 +1622,13 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                   )}
 
                   {/* Database Test Cases */}
-                  {databaseTestCases[scenario.S_id] && databaseTestCases[scenario.S_id].length > 0 && (
+                  {databaseTestCases[String(index)] && databaseTestCases[String(index)].length > 0 && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
                         <div className="flex-1">
                           <div className="space-y-3">
-                            {databaseTestCases[scenario.S_id].map((testCase, tcIndex) => {
+                            {databaseTestCases[String(index)].map((testCase, tcIndex) => {
                               const isEditing = editingDatabaseTC === testCase.id
                               const editedTC = editedDatabaseTCs[testCase.id] || testCase
                               
@@ -1602,15 +1716,15 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => toggleTestCaseExpansion(`${scenario.S_id}-${testCase.id}`)}
+                                        onClick={() => toggleTestCaseExpansion(`${index}-${testCase.id}`)}
                                         className="text-gray-500 hover:text-gray-700"
                                       >
-                                        {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) ? 'Collapse' : 'Expand'}
+                                        {expandedTestCases.has(`${index}-${testCase.id}`) ? 'Collapse' : 'Expand'}
                                       </Button>
                                     </div>
                                   </div>
                                   
-                                  {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) && (
+                                  {expandedTestCases.has(`${index}-${testCase.id}`) && (
                                     <div className="space-y-2">
                                       <div className="text-sm text-gray-600 mb-3">
                                         <strong>Steps ({getCurrentStepsForTestCase(testCase.id).length}):</strong>
@@ -1732,7 +1846,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                   )}
 
                   {/* Load Database Test Cases Button */}
-                  {!databaseTestCases[scenario.S_id] && scenario.id && scenariosWithTestCases.has(scenario.S_id) && (
+                  {!databaseTestCases[String(index)] && scenario.id && scenariosWithTestCases.has(String(index)) && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
@@ -1740,11 +1854,11 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => loadDatabaseTestCases(scenario.S_id)}
-                            disabled={isLoadingDatabaseTC === scenario.S_id}
+                            onClick={() => loadDatabaseTestCases(String(index))}
+                            disabled={isLoadingDatabaseTC === String(index)}
                             className="text-blue-600 hover:text-blue-700"
                           >
-                            {isLoadingDatabaseTC === scenario.S_id ? (
+                            {isLoadingDatabaseTC === String(index) ? (
                               <>
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 Loading...
@@ -1797,6 +1911,19 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
             </CardContent>
           </Card>
         )}
+
+        {/* Add Scenario Button at bottom */}
+        <div className="mt-8 flex justify-center">
+          <Button
+            variant="default"
+            size="lg"
+            onClick={handleAddScenario}
+            className="bg-green-600 hover:bg-green-700"
+          >
+            <Plus className="h-5 w-5 mr-2" />
+            Add New Scenario
+          </Button>
+        </div>
       </div>
     </div>
   )
