@@ -4,9 +4,10 @@ import type React from "react"
 import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Upload, Eye, ArrowRight } from "lucide-react"
+import { ArrowLeft, Upload, Eye, ArrowRight, Maximize2, X } from "lucide-react"
 import { uploadSrsDocument } from "@/service/srs_document"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { getSrsPreview } from "@/service/srs_document"
 
 interface SRSUploadScreenProps {
@@ -21,6 +22,7 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [uploadedSRS, setUploadedSRS] = useState<any>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -213,11 +215,26 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
 
                 <Card className="mt-6">
                   <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Eye className="h-5 w-5 mr-2" />
-                      Document Content Preview
-                    </CardTitle>
-                    <CardDescription>Preview of the uploaded SRS document</CardDescription>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center">
+                          <Eye className="h-5 w-5 mr-2" />
+                          Document Content Preview
+                        </CardTitle>
+                        <CardDescription>Preview of the uploaded SRS document</CardDescription>
+                      </div>
+                      {previewUrl && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsPreviewModalOpen(true)}
+                          className="flex items-center"
+                        >
+                          <Maximize2 className="h-4 w-4 mr-2" />
+                          Expand View
+                        </Button>
+                      )}
+                    </div>
                   </CardHeader>
                   <CardContent>
                     {previewUrl ? (
@@ -245,6 +262,65 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
           </CardContent>
         </Card>
       </div>
+
+      {/* PDF Preview Modal */}
+      <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
+        <DialogContent
+          className="
+            w-[100vw] h-[100vh]      /* chiếm đủ màn hình */
+            max-w-none               /* bỏ mọi giới hạn max-width mặc định */
+            sm:max-w-none md:max-w-none lg:max-w-none xl:max-w-none
+            p-0 flex flex-col
+          "
+        >
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle className="flex items-center">
+              <Eye className="h-5 w-5 mr-2" />
+              SRS Document - Full View
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4 pt-0 flex-1">
+            {previewUrl ? (
+              <iframe src={previewUrl} className="w-full h-full rounded-lg border" title="SRS Document Full View" />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground border rounded-lg">
+                Không tải được preview PDF. Kiểm tra API /srs/{"{id}"}/preview.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+        {/* <DialogContent 
+          className="max-w-[200vw] max-h-[100vh] w-[100vw] h-[100vh] p-0 flex flex-col"
+          style={{
+            maxWidth: '200vw !important',
+            maxHeight: '100vh !important',
+            width: '200vw !important',
+            height: '100vh !important',
+            margin: '0 !important'
+          }}
+        >
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle className="flex items-center">
+              <Eye className="h-5 w-5 mr-2" />
+              SRS Document - Full View
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4 pt-0 flex-1">
+            {previewUrl ? (
+              <iframe
+                src={previewUrl}
+                className="w-full h-full rounded-lg border"
+                title="SRS Document Full View"
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground border rounded-lg">
+                Không tải được preview PDF. Kiểm tra API /srs/{"{id}"}/preview.
+              </div>
+            )}
+          </div>
+        </DialogContent> */}
+      </Dialog>
+
     </div>
   )
 }
