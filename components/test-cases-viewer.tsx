@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check } from "lucide-react"
 import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase, deleteTestCase } from "@/service/testcase"
-import { updateTestCaseStep, deleteTestCaseStep } from "@/service/testcase-step"
+import { updateTestCaseStep, deleteTestCaseStep, createNewTestCaseStep } from "@/service/testcase-step"
 import { getAuthHeaders } from "@/service/auth-utils"
 
 interface Scenario {
@@ -612,30 +612,50 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
         runConfig: editedTC.runConfig
       })
 
-      try {
-        // Update all steps in database
-        const stepUpdatePromises: Promise<any>[] = []
-        Object.keys(editedDatabaseSteps).forEach(stepKey => {
-          if (stepKey.startsWith(`${tcId}-`)) {
-            const editedStep = editedDatabaseSteps[stepKey]
-            if (editedStep && editedStep.id) {
-              stepUpdatePromises.push(
-                updateTestCaseStep(editedStep.id, {
-                  stepOrder: editedStep.stepOrder,
-                  actionDescription: editedStep.actionDescription,
-                  inputData: editedStep.inputData,
-                  expectedOutput: editedStep.expectedOutput,
-                  scriptCode: editedStep.scriptCode || ""
-                })
-              )
-            }
-          }
-        })
+                try {
+                  // Update existing steps and create new steps
+                  const stepUpdatePromises: Promise<any>[] = []
+                  const stepCreatePromises: Promise<any>[] = []
+                  
+                  Object.keys(editedDatabaseSteps).forEach(stepKey => {
+                    if (stepKey.startsWith(`${tcId}-`)) {
+                      const editedStep = editedDatabaseSteps[stepKey]
+                      if (editedStep) {
+                        if (editedStep.id) {
+                          // Update existing step
+                          stepUpdatePromises.push(
+                            updateTestCaseStep(editedStep.id, {
+                              stepOrder: editedStep.stepOrder,
+                              actionDescription: editedStep.actionDescription,
+                              inputData: editedStep.inputData,
+                              expectedOutput: editedStep.expectedOutput,
+                              scriptCode: editedStep.scriptCode || ""
+                            })
+                          )
+                        } else if (editedStep.isNew) {
+                          // Create new step
+                          stepCreatePromises.push(
+                            createNewTestCaseStep({
+                              testCaseId: tcId,
+                              stepOrder: editedStep.stepOrder,
+                              actionDescription: editedStep.actionDescription,
+                              inputData: editedStep.inputData,
+                              expectedOutput: editedStep.expectedOutput,
+                              scriptCode: editedStep.scriptCode || ""
+                            })
+                          )
+                        }
+                      }
+                    }
+                  })
 
-        // Wait for all step updates to complete
-        if (stepUpdatePromises.length > 0) {
-          await Promise.all(stepUpdatePromises)
-        }
+                  // Wait for all step operations to complete
+                  if (stepUpdatePromises.length > 0) {
+                    await Promise.all(stepUpdatePromises)
+                  }
+                  if (stepCreatePromises.length > 0) {
+                    await Promise.all(stepCreatePromises)
+                  }
 
         // Update local state with all changes
         setDatabaseTestCases(prev => {
@@ -679,11 +699,24 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
           return newState
         })
 
-        alert("Đã cập nhật test case và tất cả steps thành công!")
-      } catch (stepError) {
-        console.error("Error updating steps:", stepError)
-        alert(`Có lỗi xảy ra khi cập nhật steps: ${stepError}`)
-      }
+                  // Reload test cases để hiển thị steps mới
+                  let foundSId: string | null = null
+                  for (const sId in databaseTestCases) {
+                    const tc = databaseTestCases[sId].find(tc => tc.id === tcId)
+                    if (tc) {
+                      foundSId = sId
+                      break
+                    }
+                  }
+                  if (foundSId) {
+                    await loadDatabaseTestCases(foundSId)
+                  }
+                  
+                  alert("Đã cập nhật test case và tất cả steps thành công!")
+                } catch (stepError) {
+                  console.error("Error updating steps:", stepError)
+                  alert(`Có lỗi xảy ra khi cập nhật steps: ${stepError}`)
+                }
     } catch (error) {
       console.error("Error updating database test case:", error)
       alert(`Có lỗi xảy ra khi cập nhật test case: ${error}`)
@@ -785,6 +818,132 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
       console.error("Error deleting database test case:", error)
       alert("Có lỗi xảy ra khi xóa test case. Vui lòng thử lại.")
     }
+  }
+
+  const handleAddDatabaseStep = (tcId: number) => {
+    setEditedDatabaseSteps(prev => {
+      const newState = { ...prev }
+      
+      // Tìm test case để lấy số steps hiện có
+      let foundTC: DatabaseTestCase | null = null
+      for (const sId in databaseTestCases) {
+        const tc = databaseTestCases[sId].find(tc => tc.id === tcId)
+        if (tc) {
+          foundTC = tc
+          break
+        }
+      }
+      
+      if (!foundTC) return prev
+      
+      // Đếm số steps hiện có trong editedDatabaseSteps
+      const currentStepsCount = Object.keys(newState).filter(key => 
+        key.startsWith(`${tcId}-`)
+      ).length
+      
+      const newStepKey = `${tcId}-${currentStepsCount}` // Sử dụng index tiếp theo
+      
+      newState[newStepKey] = {
+        stepOrder: currentStepsCount + 1,
+        actionDescription: "New step", // Đặt giá trị mặc định để tránh validation error
+        inputData: "",
+        expectedOutput: "",
+        scriptCode: "",
+        isNew: true // Đánh dấu là step mới
+      }
+      
+      
+      return newState
+    })
+  }
+
+  const getCurrentStepsForTestCase = (tcId: number) => {
+    // Tìm test case
+    let foundTC: DatabaseTestCase | null = null
+    for (const sId in databaseTestCases) {
+      const tc = databaseTestCases[sId].find(tc => tc.id === tcId)
+      if (tc) {
+        foundTC = tc
+        break
+      }
+    }
+    
+    if (!foundTC || !foundTC.steps) return []
+    
+    // Kiểm tra xem có đang edit test case này không
+    const isEditing = editingDatabaseTC === tcId
+    
+    if (!isEditing) {
+      // Nếu không đang edit, hiển thị tất cả steps từ database
+      return foundTC.steps
+        .sort((a, b) => a.stepOrder - b.stepOrder)
+        .map((step, index) => ({ 
+          ...step, 
+          stepKey: `${tcId}-${index}`,
+          isNew: false 
+        }))
+    }
+    
+    // Nếu đang edit, áp dụng logic xóa/thêm
+    // Lấy tất cả steps từ editedDatabaseSteps (bao gồm cả existing và new)
+    const allEditedSteps = Object.keys(editedDatabaseSteps)
+      .filter(key => key.startsWith(`${tcId}-`))
+      .map(key => ({ ...editedDatabaseSteps[key], stepKey: key }))
+      .sort((a, b) => a.stepOrder - b.stepOrder)
+    
+    return allEditedSteps
+  }
+
+  const handleRemoveDatabaseStep = async (tcId: number, stepKey: string) => {
+    // Tìm step trong editedDatabaseSteps
+    const editedStep = editedDatabaseSteps[stepKey]
+    
+    if (editedStep && editedStep.id) {
+      // Nếu là step đã lưu trong database, xóa từ database
+      try {
+        await deleteTestCaseStep(editedStep.id)
+        console.log(`Deleted step ${editedStep.id} from database`)
+      } catch (error) {
+        console.error(`Error deleting step ${editedStep.id}:`, error)
+        alert("Có lỗi xảy ra khi xóa step. Vui lòng thử lại.")
+        return
+      }
+    }
+    
+    // Xóa khỏi local state
+    setEditedDatabaseSteps(prev => {
+      const newState = { ...prev }
+      delete newState[stepKey]
+      
+      // Cập nhật lại stepOrder cho các steps còn lại
+      // Lấy tất cả steps còn lại và sắp xếp theo stepOrder hiện tại
+      const remainingSteps = Object.keys(newState)
+        .filter(key => key.startsWith(`${tcId}-`))
+        .map(key => ({ key, step: newState[key] }))
+        .sort((a, b) => a.step.stepOrder - b.step.stepOrder)
+      
+      // Cập nhật stepOrder từ 1 và cập nhật stepKey mới
+      const updatedSteps: Record<string, any> = {}
+      remainingSteps.forEach((item, index) => {
+        const newStepKey = `${tcId}-${index}`
+        updatedSteps[newStepKey] = {
+          ...item.step,
+          stepOrder: index + 1
+        }
+      })
+      
+      // Xóa tất cả steps cũ và thêm steps mới
+      Object.keys(newState).forEach(key => {
+        if (key.startsWith(`${tcId}-`)) {
+          delete newState[key]
+        }
+      })
+      
+      // Thêm steps đã cập nhật
+      Object.assign(newState, updatedSteps)
+      
+      return newState
+    })
   }
 
   const handleDeleteGeneratedTestCase = (sId: string, tcIndex: number) => {
@@ -1454,23 +1613,25 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                   {expandedTestCases.has(`${scenario.S_id}-${testCase.id}`) && (
                                     <div className="space-y-2">
                                       <div className="text-sm text-gray-600 mb-3">
-                                        <strong>Steps ({testCase.steps.length}):</strong>
+                                        <strong>Steps ({getCurrentStepsForTestCase(testCase.id).length}):</strong>
                                       </div>
-                                      {testCase.steps
-                                        .sort((a, b) => a.stepOrder - b.stepOrder)
-                                        .map((step, stepIndex) => {
-                                          const stepKey = `${testCase.id}-${stepIndex}`
+                                      {getCurrentStepsForTestCase(testCase.id).length === 0 ? (
+                                        <div className="text-gray-500 text-sm italic p-4 text-center">
+                                          No steps found for this test case
+                                        </div>
+                                      ) : (
+                                        getCurrentStepsForTestCase(testCase.id).map((step) => {
                                           const isEditingStep = isEditing
-                                          const editedStep = editedDatabaseSteps[stepKey] || step
+                                          const editedStep = editedDatabaseSteps[step.stepKey] || step
                                           
                                           return (
-                                          <div key={step.id} className="bg-white p-3 rounded border">
+                                          <div key={step.id || step.stepKey} className="bg-white p-3 rounded border">
                                             <div className="flex items-start space-x-3">
                                               <div className="flex-shrink-0 w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-semibold">
                                                 {isEditingStep ? (
                                                   <Input
                                                     value={editedStep.stepOrder}
-                                                    onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'stepOrder', parseInt(e.target.value) || 1)}
+                                                    onChange={(e) => handleFieldChangeDatabaseStep(step.stepKey, 'stepOrder', parseInt(e.target.value) || 1)}
                                                     className="w-8 h-6 text-center text-xs p-0 border-0 bg-transparent"
                                                     type="number"
                                                     min="1"
@@ -1483,13 +1644,23 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                                 <div>
                                                   <span className="font-medium text-gray-900">Action:</span>
                                                   {isEditingStep ? (
-                                                    <Textarea
-                                                      value={editedStep.actionDescription}
-                                                      onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'actionDescription', e.target.value)}
-                                                      className="mt-1"
-                                                      placeholder="Action description..."
-                                                      rows={2}
-                                                    />
+                                                    <div className="flex items-start space-x-2">
+                                                      <Textarea
+                                                        value={editedStep.actionDescription}
+                                                        onChange={(e) => handleFieldChangeDatabaseStep(step.stepKey, 'actionDescription', e.target.value)}
+                                                        className="mt-1 flex-1"
+                                                        placeholder="Action description..."
+                                                        rows={2}
+                                                      />
+                                                      <Button
+                                                        variant="ghost"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveDatabaseStep(testCase.id, step.stepKey)}
+                                                        className="text-red-500 hover:text-red-700 mt-1"
+                                                      >
+                                                        <X className="h-4 w-4" />
+                                                      </Button>
+                                                    </div>
                                                   ) : (
                                                     <p className="text-gray-700 mt-1">{step.actionDescription}</p>
                                                   )}
@@ -1499,7 +1670,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={editedStep.inputData}
-                                                      onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'inputData', e.target.value)}
+                                                      onChange={(e) => handleFieldChangeDatabaseStep(step.stepKey, 'inputData', e.target.value)}
                                                       className="mt-1 text-sm"
                                                       placeholder="Input data..."
                                                       rows={2}
@@ -1519,7 +1690,7 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={editedStep.expectedOutput}
-                                                      onChange={(e) => handleFieldChangeDatabaseStep(stepKey, 'expectedOutput', e.target.value)}
+                                                      onChange={(e) => handleFieldChangeDatabaseStep(step.stepKey, 'expectedOutput', e.target.value)}
                                                       className="mt-1"
                                                       placeholder="Expected output..."
                                                       rows={2}
@@ -1532,7 +1703,22 @@ export function TestCasesViewer({ data, onBack }: TestCasesViewerProps) {
                                             </div>
                                           </div>
                                           )
-                                        })}
+                                        })
+                                      )}
+                                      
+                                      {/* Add Step Button - chỉ hiển thị khi đang edit */}
+                                      {isEditing && (
+                                        <div className="mt-3">
+                                          <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleAddDatabaseStep(testCase.id)}
+                                            className="text-blue-600 hover:text-blue-700"
+                                          >
+                                            + Add Step
+                                          </Button>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </CardContent>
