@@ -1,12 +1,14 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { ArrowLeft, Upload, Eye, ArrowRight } from "lucide-react"
+import { ArrowLeft, Upload, Eye, ArrowRight, Maximize2, X } from "lucide-react"
 import { uploadSrsDocument } from "@/service/srs_document"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { getSrsPreview } from "@/service/srs_document"
 
 interface SRSUploadScreenProps {
   onBack: () => void
@@ -17,8 +19,10 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
   const [uploadStep, setUploadStep] = useState<"select" | "uploading" | "success">("select")
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [uploadedFileContent, setUploadedFileContent] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [uploadedSRS, setUploadedSRS] = useState<any>(null)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -75,55 +79,37 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
       console.log('Upload response data:', (response as any)?.data)
       console.log('Upload response status:', (response as any)?.status)
 
-      // Tạo mock content để hiển thị preview (có thể thay bằng content thật từ API)
-      const mockPdfContent = `
-Software Requirements Specification
-${selectedFile.name}
-
-1. INTRODUCTION
-This document specifies the requirements for the ${selectedFile.name.replace(/\.[^/.]+$/, "")} system.
-
-2. FUNCTIONAL REQUIREMENTS
-2.1 User Authentication
-- The system shall provide user login functionality
-- The system shall validate user credentials
-- The system shall maintain user sessions
-
-2.2 Data Management
-- The system shall allow data input and validation
-- The system shall store data securely
-- The system shall provide data retrieval capabilities
-
-3. NON-FUNCTIONAL REQUIREMENTS
-3.1 Performance
-- The system shall respond within 2 seconds for standard operations
-- The system shall support up to 100 concurrent users
-
-3.2 Security
-- All data transmissions shall be encrypted
-- User passwords shall be hashed and salted
-- The system shall implement role-based access control
-
-4. USER INTERFACE REQUIREMENTS
-- The interface shall be responsive and mobile-friendly
-- The system shall provide clear error messages
-- Navigation shall be intuitive and consistent
-
-This is a simulated PDF content for demonstration purposes.
-      `.trim()
-
-      // Sử dụng dữ liệu từ API response hoặc tạo mock data
-      const newSRS = (response as any)?.data || {
-        id: Date.now(),
-        name: selectedFile.name.replace(/\.[^/.]+$/, ""),
-        description: `SRS document for ${selectedFile.name.replace(/\.[^/.]+$/, "")} system`,
-        file_path: `/uploads/${selectedFile.name}`,
-        uploaded_by: 1,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+      // Chuẩn hóa đối tượng trả về và ID SRS
+      const resp: any = response as any
+      const srsId: number | undefined =
+        resp?.document?.id ?? resp?.id ?? resp?.srsId ?? resp?.data?.id ?? resp?.data?.srsId
+      if (!srsId) {
+        throw new Error("Không lấy được SRS id từ phản hồi upload")
       }
 
-      setUploadedFileContent(mockPdfContent)
+      const backendDoc = resp?.document ?? (resp?.data?.document)
+      const newSRS = backendDoc || {
+        id: srsId,
+        name: selectedFile.name.replace(/\.[^/.]+$/, ""),
+        description: `SRS document for ${selectedFile.name.replace(/\.[^/.]+$/, "")} system`,
+        filePath: resp?.filePath || `/uploads/${selectedFile.name}`,
+        uploadedBy: { id: 0, username: "" },
+        uploadedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      // đảm bảo có id đúng
+      newSRS.id = newSRS.id ?? srsId
+      
+      // Gọi preview API để lấy PDF blob và tạo object URL
+      try {
+        const blob = await getSrsPreview(srsId)
+        const url = URL.createObjectURL(blob)
+        setPreviewUrl(url)
+      } catch (e) {
+        console.warn('Load preview failed:', e)
+      }
+
+      setUploadedFileContent(null)
       setUploadedSRS(newSRS)
       setUploadStep("success")
       
@@ -156,14 +142,14 @@ This is a simulated PDF content for demonstration purposes.
       <div className="container mx-auto p-6 max-w-4xl">
         <Card>
           <CardHeader>
-            <CardTitle className="flex items-center">
+            {/* <CardTitle className="flex items-center">
               <Upload className="h-5 w-5 mr-2" />
               Upload SRS Document
-            </CardTitle>
+            </CardTitle> */}
             <CardDescription>
               {uploadStep === "select" && "Select an SRS file to upload"}
               {uploadStep === "uploading" && "Uploading your SRS document..."}
-              {uploadStep === "success" && "Upload completed successfully!"}
+              {/* {uploadStep === "success" && "Upload completed successfully!"} */}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -222,29 +208,48 @@ This is a simulated PDF content for demonstration purposes.
                     <Upload className="h-6 w-6 text-green-600" />
                   </div>
                   <h3 className="text-lg font-semibold mb-2">Upload Successful!</h3>
-                  <p className="text-sm text-muted-foreground">
+                  {/* <p className="text-sm text-muted-foreground">
                     Your SRS document has been uploaded and processed successfully.
-                  </p>
+                  </p> */}
                 </div>
 
-                {uploadedFileContent && (
-                  <Card className="mt-6">
-                    <CardHeader>
-                      <CardTitle className="flex items-center">
-                        <Eye className="h-5 w-5 mr-2" />
-                        Document Content Preview
-                      </CardTitle>
-                      <CardDescription>Preview of the uploaded SRS document</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-96 overflow-y-auto bg-muted/30 p-6 rounded-lg border w-full">
-                        <pre className="text-sm whitespace-pre-wrap font-mono leading-relaxed">
-                          {uploadedFileContent}
-                        </pre>
+                <Card className="mt-6">
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="flex items-center">
+                          <Eye className="h-5 w-5 mr-2" />
+                          Document Content Preview
+                        </CardTitle>
+                        <CardDescription>Preview of the uploaded SRS document</CardDescription>
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
+                      {previewUrl && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setIsPreviewModalOpen(true)}
+                          className="flex items-center"
+                        >
+                          <Maximize2 className="h-4 w-4 mr-2" />
+                          Expand View
+                        </Button>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {previewUrl ? (
+                      <iframe
+                        src={previewUrl}
+                        className="w-full h-96 rounded-lg border"
+                        title="SRS Preview"
+                      />
+                    ) : (
+                      <div className="h-24 flex items-center justify-center text-sm text-muted-foreground border rounded-lg">
+                        Không tải được preview PDF. Kiểm tra API /srs/{"{id}"}/preview.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
 
                 <div className="flex justify-end mt-6">
                   <Button onClick={handleContinue} className="flex items-center">
@@ -257,6 +262,65 @@ This is a simulated PDF content for demonstration purposes.
           </CardContent>
         </Card>
       </div>
+
+      {/* PDF Preview Modal */}
+      <Dialog open={isPreviewModalOpen} onOpenChange={setIsPreviewModalOpen}>
+        <DialogContent
+          className="
+            w-[100vw] h-[100vh]      /* chiếm đủ màn hình */
+            max-w-none               /* bỏ mọi giới hạn max-width mặc định */
+            sm:max-w-none md:max-w-none lg:max-w-none xl:max-w-none
+            p-0 flex flex-col
+          "
+        >
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle className="flex items-center">
+              <Eye className="h-5 w-5 mr-2" />
+              SRS Document - Full View
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4 pt-0 flex-1">
+            {previewUrl ? (
+              <iframe src={previewUrl} className="w-full h-full rounded-lg border" title="SRS Document Full View" />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground border rounded-lg">
+                Không tải được preview PDF. Kiểm tra API /srs/{"{id}"}/preview.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+        {/* <DialogContent 
+          className="max-w-[200vw] max-h-[100vh] w-[100vw] h-[100vh] p-0 flex flex-col"
+          style={{
+            maxWidth: '200vw !important',
+            maxHeight: '100vh !important',
+            width: '200vw !important',
+            height: '100vh !important',
+            margin: '0 !important'
+          }}
+        >
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle className="flex items-center">
+              <Eye className="h-5 w-5 mr-2" />
+              SRS Document - Full View
+            </DialogTitle>
+          </DialogHeader>
+          <div className="p-4 pt-0 flex-1">
+            {previewUrl ? (
+              <iframe
+                src={previewUrl}
+                className="w-full h-full rounded-lg border"
+                title="SRS Document Full View"
+              />
+            ) : (
+              <div className="h-full flex items-center justify-center text-muted-foreground border rounded-lg">
+                Không tải được preview PDF. Kiểm tra API /srs/{"{id}"}/preview.
+              </div>
+            )}
+          </div>
+        </DialogContent> */}
+      </Dialog>
+
     </div>
   )
 }
