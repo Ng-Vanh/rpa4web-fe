@@ -714,21 +714,28 @@ const handleCheckStepScore = async (stepId: number) => {
   try {
     const result = await checkScore(stepId);
 
-    // giả sử API trả về { score: number, status: string }
-    const { score, status } = result;
+    // API trả về { message, executionStepId, score }
+    const { message, executionStepId, score } = result;
 
     setStepScoreResults((prev) => ({
       ...prev,
-      [stepId]: { score, status },
+      [stepId]: { 
+        score: score ?? 0, 
+        status: message || "Checked" 
+      },
     }));
   } catch (error) {
     console.error("Failed to check step score:", error);
     setStepScoreResults((prev) => ({
       ...prev,
-      [stepId]: { score: 0, status: "Error" },
+      [stepId]: { 
+        score: 0, 
+        status: "Error" 
+      },
     }));
   }
 };
+
 
   const isStepExecuted = (step: any) => {
     return step.scriptCode && step.scriptCode.trim() !== "";
@@ -1241,7 +1248,7 @@ const handleCheckStepScore = async (stepId: number) => {
                               e.stopPropagation();
                               handleCheckStepScore(step.id);
                             }}
-                            disabled={!executionCompleted || !!stepScore}
+                            // disabled={!executionCompleted || !!stepScore}
                             className="text-xs h-6 px-2"
                           >
                             <CheckCircle2 className="h-3 w-3 mr-1" />

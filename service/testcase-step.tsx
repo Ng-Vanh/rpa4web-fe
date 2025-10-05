@@ -278,7 +278,7 @@ const checkScore = async (stepId: number) => {
             throw new Error('Invalid step ID');
         }
 
-        const response = await axios.get(`${API_BASE_URL}/test-execution-steps/${stepId}/check-score`, {
+        const response = await axios.post(`${API_BASE_URL}/test-execution-steps/${stepId}/check-score`, {
             headers: {
                 ...getAuthHeaders(),
             },
