@@ -341,7 +341,7 @@ export function StepEditModal({
           </div>
 
           {/* Step Reference Image */}
-          <div className="space-y-2">
+          {/* <div className="space-y-2">
             <Label>Step Reference Image</Label>
             <p className="text-sm text-muted-foreground mb-2">
               Upload an image to help describe this step (e.g., highlight a
@@ -396,7 +396,7 @@ export function StepEditModal({
                 )}
               </div>
             </div>
-          </div>
+          </div> */}
 
           {/* Object Image */}
           <div className="space-y-2">

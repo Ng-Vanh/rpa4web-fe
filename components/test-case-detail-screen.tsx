@@ -32,6 +32,12 @@ import {
   Eye,
 } from "lucide-react";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   mockExpectedResults,
   mockExecutionSteps,
   mockVerifications,
@@ -722,32 +728,31 @@ export function TestCaseDetailScreen({
     }
   };
 
-const handleCheckStepScore = async (stepId: number) => {
-  try {
-    const result = await checkScore(stepId);
+  const handleCheckStepScore = async (stepId: number) => {
+    try {
+      const result = await checkScore(stepId);
 
-    // API trả về { message, executionStepId, score }
-    const { message, executionStepId, score } = result;
+      // API trả về { message, executionStepId, score }
+      const { message, executionStepId, score } = result;
 
-    setStepScoreResults((prev) => ({
-      ...prev,
-      [stepId]: { 
-        score: score ?? 0, 
-        status: message || "Checked" 
-      },
-    }));
-  } catch (error) {
-    console.error("Failed to check step score:", error);
-    setStepScoreResults((prev) => ({
-      ...prev,
-      [stepId]: { 
-        score: 0, 
-        status: "Error" 
-      },
-    }));
-  }
-};
-
+      setStepScoreResults((prev) => ({
+        ...prev,
+        [stepId]: {
+          score: score ?? 0,
+          status: message || "Checked",
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to check step score:", error);
+      setStepScoreResults((prev) => ({
+        ...prev,
+        [stepId]: {
+          score: 0,
+          status: "Error",
+        },
+      }));
+    }
+  };
 
   const isStepExecuted = (step: any) => {
     return step.scriptCode && step.scriptCode.trim() !== "";
@@ -1209,7 +1214,7 @@ const handleCheckStepScore = async (stepId: number) => {
                             Edit
                           </Button>
                         </div>
-                        <div className="flex items-center gap-2">
+                        {/* <div className="flex items-center gap-2">
                           {getStepDisplayImage(step) && (
                             <div className="w-12 h-8 bg-muted rounded overflow-hidden">
                               <img
@@ -1247,7 +1252,7 @@ const handleCheckStepScore = async (stepId: number) => {
                               Executed
                             </Badge>
                           )}
-                        </div>
+                        </div> */}
                       </div>
                     </CardHeader>
                     <CardContent className="pt-0">
@@ -1277,9 +1282,33 @@ const handleCheckStepScore = async (stepId: number) => {
                         <div className="flex gap-2 mb-2 pt-2 border-t">
                           {step.objectImgUrl && (
                             <div className="flex flex-col gap-1">
-                              <span className="text-xs text-muted-foreground">
-                                Object:
-                              </span>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs text-muted-foreground">
+                                  Object:
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-4 px-1 text-[10px] bg-background/80 backdrop-blur-sm border shadow-sm hover:bg-background"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(
+                                      step.objectImgUrl!
+                                    );
+                                    setCopyMessage(`object-${step.id}`);
+                                    setTimeout(
+                                      () => setCopyMessage(null),
+                                      2000
+                                    );
+                                  }}
+                                >
+                                  {copyMessage === `object-${step.id}` ? (
+                                    <span className="font-medium">Copied!</span>
+                                  ) : (
+                                    <span>Copy URL</span>
+                                  )}
+                                </Button>
+                              </div>
                               <div
                                 className="w-12 h-9 bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                                 onClick={(e) => {
@@ -1300,9 +1329,33 @@ const handleCheckStepScore = async (stepId: number) => {
                           )}
                           {step.relatedObjectImgUrl && (
                             <div className="flex flex-col gap-1">
-                              <span className="text-xs text-muted-foreground">
-                                Related:
-                              </span>
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs text-muted-foreground">
+                                  Related:
+                                </span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-4 px-1 text-[10px] bg-background/80 backdrop-blur-sm border shadow-sm hover:bg-background"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    navigator.clipboard.writeText(
+                                      step.relatedObjectImgUrl!
+                                    );
+                                    setCopyMessage(`related-${step.id}`);
+                                    setTimeout(
+                                      () => setCopyMessage(null),
+                                      2000
+                                    );
+                                  }}
+                                >
+                                  {copyMessage === `related-${step.id}` ? (
+                                    <span className="font-medium">Copied!</span>
+                                  ) : (
+                                    <span>Copy URL</span>
+                                  )}
+                                </Button>
+                              </div>
                               <div
                                 className="w-12 h-9 bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
                                 onClick={(e) => {
@@ -1597,32 +1650,41 @@ const handleCheckStepScore = async (stepId: number) => {
                 Run Test
               </Button>
 
-              <IconExpandButton
-                icon={<FileCode className="h-4 w-4" />}
-                text={
-                  isGeneratingScript ? "Generating..." : "Generate Test Script"
-                }
-                onClick={handleGenerateScript}
-                disabled={isGeneratingScript}
-              />
-
-              <IconExpandButton
-                icon={<Layers className="h-4 w-4 " />}
-                text={
-                  isGeneratingAllScripts
-                    ? "Generating All..."
-                    : "Generate All Test Scripts"
-                }
-                onClick={handleGenerateAllScripts}
-                disabled={isGeneratingAllScripts || steps.length === 0}
-              />
-
-              <IconExpandButton
-                icon={<Eye className="h-4 w-4 " />}
-                text="View Full Script"
-                onClick={handleViewFullScript}
-                disabled={isGeneratingAllScripts || steps.length === 0}
-              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline">
+                    <Code className="h-4 w-4 mr-2" />
+                    Script Actions
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem
+                    onClick={handleGenerateScript}
+                    disabled={isGeneratingScript}
+                  >
+                    <FileCode className="h-4 w-4 mr-2" />
+                    {isGeneratingScript
+                      ? "Generating..."
+                      : "Generate Test Script"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleGenerateAllScripts}
+                    disabled={isGeneratingAllScripts || steps.length === 0}
+                  >
+                    <Layers className="h-4 w-4 mr-2" />
+                    {isGeneratingAllScripts
+                      ? "Generating All..."
+                      : "Generate All Test Scripts"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleViewFullScript}
+                    disabled={isGeneratingAllScripts || steps.length === 0}
+                  >
+                    <Eye className="h-4 w-4 mr-2" />
+                    View Full Script
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>
