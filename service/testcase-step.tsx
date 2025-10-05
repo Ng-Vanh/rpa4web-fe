@@ -389,26 +389,10 @@ const checkScore = async (stepId: number) => {
         }
         throw error;
     }
+}
 
-    const response = await axios.get(
-      `${API_BASE_URL}/test-execution-steps/${stepId}/check-score`,
-      {
-        headers: {
-          ...getAuthHeaders(),
-        },
-      }
-    );
+   
 
-    console.log("Fetched test case step score:", response.data);
-    return response.data;
-  } catch (error) {
-    console.error("Error fetching test case step score:", error);
-    if (axios.isAxiosError(error)) {
-      console.error("Fetch error response:", error.response?.data);
-    }
-    throw error;
-  }
-};
 
 export {
   getAllTestCaseSteps,
