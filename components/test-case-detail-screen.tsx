@@ -37,6 +37,7 @@ import {
   mockVerifications,
 } from "@/lib/mock-data";
 import { StepEditModal } from "@/components/step-edit-modal";
+import { ImageViewerModal } from "@/components/image-viewer-modal";
 import { getTestCaseById } from "@/service/testcase";
 import {
   getAllTestCaseSteps,
@@ -51,9 +52,12 @@ import {
   generateAllTestScripts,
   getTestScript,
 } from "@/service/gen-script";
-import { executeStep, getExecutionSteps, checkScore } from "@/service/testcase-step";
+import {
+  executeStep,
+  getExecutionSteps,
+  checkScore,
+} from "@/service/testcase-step";
 import { IconExpandButton } from "./ui/icon-expand-button";
-
 
 interface TestCaseDetailScreenProps {
   onBack: () => void;
@@ -70,10 +74,11 @@ interface TestCaseStep {
   expectedOutput: string;
   scriptCode?: string;
   imgUrl?: string;
+  objectImgUrl?: string;
+  relatedObjectImgUrl?: string;
   expectedPageUrl?: string;
 }
 
-// Add interface for execution step
 interface TestExecutionStep {
   id: number;
   stepId: number;
@@ -116,25 +121,26 @@ export function TestCaseDetailScreen({
   const [stepColumnWidth, setStepColumnWidth] = useState(425);
   const [isResizing, setIsResizing] = useState(false);
 
-  // Add script generation loading state
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingAllScripts, setIsGeneratingAllScripts] = useState(false);
 
-  // Add step execution states
   const [executingSteps, setExecutingSteps] = useState<Set<number>>(new Set());
 
-  // quản lý popup và nội dung script code
   const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
   const [fullScript, setFullScript] = useState<string>("");
   const [scriptError, setScriptError] = useState<string>("");
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
 
-  // Add execution steps state to track screenshots separately
   const [executionSteps, setExecutionSteps] = useState<{
     [stepId: number]: TestExecutionStep;
   }>({});
 
-  // API data states
+  const [imageViewerOpen, setImageViewerOpen] = useState(false);
+  const [viewingImage, setViewingImage] = useState<{
+    url: string;
+    title: string;
+  } | null>(null);
+
   const [testCase, setTestCase] = useState<TestCaseDetail>(initialTestCase);
   const [steps, setSteps] = useState<TestCaseStep[]>([]);
   const [loading, setLoading] = useState(true);
@@ -152,12 +158,16 @@ export function TestCaseDetailScreen({
 
   const [editSteps, setEditSteps] = useState<TestCaseStep[]>([]);
 
-  // Keep mock data for features not yet implemented via API
-  // const expectedOutput = mockExpectedResults.filter((er) => er.test_case_id === testCase.id)
-  // const executionSteps = mockExecutionSteps
-  // const verifications = mockVerifications
+  const handleImageClick = (imageUrl: string, title: string) => {
+    setViewingImage({ url: imageUrl, title });
+    setImageViewerOpen(true);
+  };
 
-  // Fetch detailed test case data when component mounts
+  const handleCloseImageViewer = () => {
+    setImageViewerOpen(false);
+    setViewingImage(null);
+  };
+
   useEffect(() => {
     const fetchTestCaseDetail = async () => {
       try {
@@ -166,7 +176,6 @@ export function TestCaseDetailScreen({
         const detailedTestCase = response.data || response;
         setTestCase(detailedTestCase);
 
-        // Update form data with fetched details
         setEditFormData({
           test_item:
             detailedTestCase.testItem || detailedTestCase.test_item || "",
@@ -179,7 +188,6 @@ export function TestCaseDetailScreen({
         });
       } catch (error) {
         console.error("Failed to fetch test case details:", error);
-        // Keep using initial test case data if API fails
       } finally {
         setLoading(false);
       }
@@ -188,19 +196,16 @@ export function TestCaseDetailScreen({
     fetchTestCaseDetail();
   }, [testCase.id]);
 
-  // Fetch test case steps
   useEffect(() => {
     fetchTestCaseSteps();
   }, [testCase.id]);
 
-  // Extract fetchTestCaseSteps as a separate function for reusability
   const fetchTestCaseSteps = async () => {
     try {
       setStepsLoading(true);
       const response = await getAllTestCaseSteps(testCase.id);
       const fetchedSteps = response.data || response;
 
-      // Transform steps to match expected format with additional UI fields
       const transformedSteps = fetchedSteps.map((step: TestCaseStep) => ({
         ...step,
         stepImage: null as File | null,
@@ -220,13 +225,10 @@ export function TestCaseDetailScreen({
     }
   };
 
-  // Helper function to get the display image URL for a step
   const getStepDisplayImage = (step: TestCaseStep) => {
-    // In execution view, prioritize execution screenshot if available
     if (viewMode === "execution" && executionSteps[step.id]?.screenshotUrl) {
       return executionSteps[step.id].screenshotUrl;
     }
-    // Otherwise use the original step image
     return (
       step.imgUrl ||
       `/placeholder.svg?height=200&width=300&query=step-${step.stepOrder}-screenshot`
@@ -247,27 +249,31 @@ export function TestCaseDetailScreen({
       );
 
       if (isNewStep) {
-        // Adding new step - call create API
         console.log("Creating new step:", updatedStep);
 
-        // Prepare data for API call with consistent field names
         const stepData = {
           testCaseId: updatedStep.testCaseId,
           stepOrder: updatedStep.stepOrder,
           actionDescription: updatedStep.actionDescription,
           inputData: updatedStep.inputData || "",
-          expectedOutput: updatedStep.expectedOutput || "", // Consistent field name
+          expectedOutput: updatedStep.expectedOutput || "",
           scriptCode: updatedStep.scriptCode || "",
           stepImage:
             updatedStep.stepImage instanceof File
               ? updatedStep.stepImage
               : null,
+          objectImage:
+            updatedStep.objectImage instanceof File
+              ? updatedStep.objectImage
+              : null,
+          relatedObjectImage:
+            updatedStep.relatedObjectImage instanceof File
+              ? updatedStep.relatedObjectImage
+              : null,
         };
 
-        // Call API to create the step
         const createdStep = await createNewTestCaseStep(stepData);
 
-        // Update the step with the real data from API response
         const stepWithRealId = {
           ...updatedStep,
           id: createdStep.id,
@@ -278,18 +284,21 @@ export function TestCaseDetailScreen({
           inputData: createdStep.inputData || stepData.inputData,
           expectedOutput: createdStep.expectedOutput || stepData.expectedOutput,
           scriptCode: createdStep.scriptCode || stepData.scriptCode,
-          imgUrl: createdStep.imgUrl || updatedStep.imgUrl, // Use API response or keep existing
-          stepImage: null, // Clear the file object after successful upload
+          imgUrl: createdStep.imgUrl || updatedStep.imgUrl,
+          objectImgUrl: createdStep.objectImgUrl || updatedStep.objectImgUrl,
+          relatedObjectImgUrl:
+            createdStep.relatedObjectImgUrl || updatedStep.relatedObjectImgUrl,
+          stepImage: null,
+          objectImage: null,
+          relatedObjectImage: null,
         };
 
         setEditSteps((prev) => [...prev, stepWithRealId]);
         setSteps((prev) => [...prev, stepWithRealId]);
         console.log("Successfully created new step:", stepWithRealId);
       } else {
-        // Editing existing step - call update API
         console.log("Updating existing step:", updatedStep.id);
 
-        // Prepare data for update - only include changed fields
         const updateData: any = {};
 
         const originalStep = steps.find((s) => s.id === updatedStep.id);
@@ -314,8 +323,23 @@ export function TestCaseDetailScreen({
           if (updatedStep.stepImage instanceof File) {
             updateData.stepImage = updatedStep.stepImage;
           }
+          if (updatedStep.objectImage instanceof File) {
+            updateData.objectImage = updatedStep.objectImage;
+          }
+          if (updatedStep.relatedObjectImage instanceof File) {
+            updateData.relatedObjectImage = updatedStep.relatedObjectImage;
+          }
+
+          if (updatedStep.removeStepImage === true) {
+            updateData.removeStepImage = true;
+          }
+          if (updatedStep.removeObjectImage === true) {
+            updateData.removeObjectImage = true;
+          }
+          if (updatedStep.removeRelatedObjectImage === true) {
+            updateData.removeRelatedObjectImage = true;
+          }
         } else {
-          // If we can't find the original step, send all data
           updateData.stepOrder = updatedStep.stepOrder;
           updateData.actionDescription = updatedStep.actionDescription;
           updateData.inputData = updatedStep.inputData || "";
@@ -324,20 +348,38 @@ export function TestCaseDetailScreen({
           if (updatedStep.stepImage instanceof File) {
             updateData.stepImage = updatedStep.stepImage;
           }
+          if (updatedStep.objectImage instanceof File) {
+            updateData.objectImage = updatedStep.objectImage;
+          }
+          if (updatedStep.relatedObjectImage instanceof File) {
+            updateData.relatedObjectImage = updatedStep.relatedObjectImage;
+          }
+          if (updatedStep.removeStepImage === true) {
+            updateData.removeStepImage = true;
+          }
+          if (updatedStep.removeObjectImage === true) {
+            updateData.removeObjectImage = true;
+          }
+          if (updatedStep.removeRelatedObjectImage === true) {
+            updateData.removeRelatedObjectImage = true;
+          }
         }
 
-        // Call API to update the step
         const apiResponse = await updateTestCaseStep(
           updatedStep.id,
           updateData
         );
 
-        // Merge API response with updated step
         const updatedStepWithApiData = {
           ...updatedStep,
           ...apiResponse,
           imgUrl: apiResponse.imgUrl || updatedStep.imgUrl,
-          stepImage: null, // Clear the file object after successful upload
+          objectImgUrl: apiResponse.objectImgUrl || updatedStep.objectImgUrl,
+          relatedObjectImgUrl:
+            apiResponse.relatedObjectImgUrl || updatedStep.relatedObjectImgUrl,
+          stepImage: null,
+          objectImage: null,
+          relatedObjectImage: null,
         };
 
         setEditSteps((prev) =>
@@ -358,28 +400,19 @@ export function TestCaseDetailScreen({
     } catch (error) {
       console.error("Error saving step:", error);
 
-      // Provide user-friendly error message
       let errorMessage = "Error saving step. Please try again.";
       if (error instanceof Error) {
         errorMessage = error.message;
       }
 
-      // You might want to use a proper toast notification here
       alert(errorMessage);
-
-      // Keep modal open so user can try again
     }
   };
 
   const handleSave = async () => {
     try {
-      // In a real app, this would save to backend
       console.log("Saving test case changes:", editFormData);
       console.log("Saving step changes:", editSteps);
-
-      // TODO: Implement API calls to save test case and steps
-      // await updateTestCase(testCase.id, editFormData)
-      // await updateTestCaseSteps(testCase.id, editSteps)
 
       setIsEditing(false);
     } catch (error) {
@@ -413,9 +446,8 @@ export function TestCaseDetailScreen({
   };
 
   const handleAddStep = () => {
-    // Create a new step template
     const newStep = {
-      id: Date.now(), // Temporary ID for new step
+      id: Date.now(),
       testCaseId: testCase.id,
       stepOrder: steps.length + 1,
       actionDescription: "",
@@ -502,7 +534,6 @@ export function TestCaseDetailScreen({
   };
 
   const handleVerifyOutputs = () => {
-    // Simulate verification process
     setVerificationResults({
       overallScore: 0.95,
       stepResults: steps.map((step) => ({
@@ -513,28 +544,20 @@ export function TestCaseDetailScreen({
     });
   };
 
-  // Updated handleGenerateScript function with API integration
   const handleGenerateScript = async () => {
     try {
       setIsGeneratingScript(true);
       console.log("Generating test script for test case:", testCase.id);
 
-      // Call the API to generate test script
       const script = await generateTestScript(testCase.id);
       console.log("Generated script:", script);
 
-      // After generation, refresh the steps to get the updated scriptCode
       await fetchTestCaseSteps();
 
-      // Switch to execution view to show the generated scripts
       setViewMode("execution");
-
-      // Show success message (you might want to use a proper toast notification)
-      // alert("Test script generated successfully!")
     } catch (error) {
       console.error("Failed to generate test script:", error);
 
-      // Show error message
       let errorMessage = "Failed to generate test script. Please try again.";
       if (error instanceof Error) {
         errorMessage = error.message;
@@ -594,18 +617,14 @@ export function TestCaseDetailScreen({
     }
   };
 
-  // Updated step execution handler - now properly handles execution screenshots
   const handleExecuteStep = async (stepId: number) => {
     try {
-      // Add step to executing set
       setExecutingSteps((prev) => new Set([...prev, stepId]));
       console.log("Executing step:", stepId);
 
-      // Call the API to execute the step
       const result = await executeStep(stepId);
       console.log("Step execution result:", result);
 
-      // Backend trả về: { message: "...", executionStepId: 123 }
       if (result && result.executionStepId) {
         try {
           console.log(
@@ -613,13 +632,11 @@ export function TestCaseDetailScreen({
             result.executionStepId
           );
 
-          // Gọi API để lấy thông tin chi tiết execution step với screenshot
           const executionDetails = await getExecutionSteps(
             result.executionStepId
           );
           console.log("Execution details:", executionDetails);
 
-          // Cập nhật execution steps state với screenshot từ execution details
           if (executionDetails) {
             const executionData = {
               id: result.executionStepId,
@@ -652,7 +669,6 @@ export function TestCaseDetailScreen({
           }
         } catch (fetchError) {
           console.error("Failed to fetch execution details:", fetchError);
-          // Nếu không lấy được execution details, vẫn lưu basic info
           setExecutionSteps((prev) => ({
             ...prev,
             [stepId]: {
@@ -669,7 +685,6 @@ export function TestCaseDetailScreen({
         console.warn("No executionStepId returned from execute API");
       }
 
-      // If currently selected step is the executed step, refresh the view
       if (selectedStep?.id === stepId) {
         setSelectedStep({ ...selectedStep });
       }
@@ -678,7 +693,6 @@ export function TestCaseDetailScreen({
     } catch (error) {
       console.error("Failed to execute step:", error);
 
-      // Show error message with more details
       let errorMessage = "Failed to execute step. Please try again.";
       if (error instanceof Error) {
         errorMessage = error.message;
@@ -692,7 +706,6 @@ export function TestCaseDetailScreen({
           typeof error.response === "object" &&
           "data" in error.response
         ) {
-          // Now it's safe to access error.response.data
           // @ts-ignore
           console.error("API Error Response:", error.response.data);
           // @ts-ignore
@@ -701,7 +714,6 @@ export function TestCaseDetailScreen({
       }
       alert(errorMessage);
     } finally {
-      // Remove step from executing set
       setExecutingSteps((prev) => {
         const newSet = new Set(prev);
         newSet.delete(stepId);
@@ -747,7 +759,6 @@ const handleCheckStepScore = async (stepId: number) => {
     );
   };
 
-  // Helper function to check if step has been executed (has execution result)
   const isStepExecutionCompleted = (stepId: number) => {
     return executionSteps[stepId] && executionSteps[stepId].screenshotUrl;
   };
@@ -764,7 +775,6 @@ const handleCheckStepScore = async (stepId: number) => {
 
   const renderDetailsView = () => (
     <div className="flex h-[calc(100vh-4rem)]">
-      {/* Left Panel - Test Case Details */}
       <div className="flex-1 p-8">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between">
@@ -854,7 +864,6 @@ const handleCheckStepScore = async (stepId: number) => {
                   {(isEditing ? editSteps : steps).map((step, index) => (
                     <Card key={step.id} className="p-4">
                       <div className="flex gap-4">
-                        {/* Left side - Step content */}
                         <div className="flex-1 space-y-3">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -945,9 +954,57 @@ const handleCheckStepScore = async (stepId: number) => {
                               {step.inputData && ` (${step.inputData})`}
                             </p>
                           )}
+
+                          {(step.objectImgUrl || step.relatedObjectImgUrl) && (
+                            <div className="flex gap-2 mt-2">
+                              {step.objectImgUrl && (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-xs text-muted-foreground">
+                                    Object Image:
+                                  </span>
+                                  <div
+                                    className="w-20 h-14 bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                    onClick={() =>
+                                      handleImageClick(
+                                        step.objectImgUrl!,
+                                        `Step ${step.stepOrder} - Object Image`
+                                      )
+                                    }
+                                  >
+                                    <img
+                                      src={step.objectImgUrl}
+                                      alt={`Step ${step.stepOrder} object`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                              {step.relatedObjectImgUrl && (
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-xs text-muted-foreground">
+                                    Related Object:
+                                  </span>
+                                  <div
+                                    className="w-20 h-14 bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                    onClick={() =>
+                                      handleImageClick(
+                                        step.relatedObjectImgUrl!,
+                                        `Step ${step.stepOrder} - Related Object Image`
+                                      )
+                                    }
+                                  >
+                                    <img
+                                      src={step.relatedObjectImgUrl}
+                                      alt={`Step ${step.stepOrder} related object`}
+                                      className="w-full h-full object-cover"
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        {/* Right side - Image */}
                         <div className="w-48 flex-shrink-0">
                           <div className="aspect-video bg-muted rounded-lg overflow-hidden">
                             <img
@@ -998,7 +1055,6 @@ const handleCheckStepScore = async (stepId: number) => {
         </Card>
       </div>
 
-      {/* Right Panel - Generate Script */}
       <div className="w-96 border-l bg-card p-6">
         <Card>
           <CardHeader>
@@ -1063,7 +1119,6 @@ const handleCheckStepScore = async (stepId: number) => {
       onMouseMove={handleResizeMove}
       onMouseUp={handleResizeEnd}
     >
-      {/* Left Panel - Test Steps */}
       <div
         className="border-r bg-card flex flex-col relative"
         style={{ width: `${stepColumnWidth}px` }}
@@ -1155,7 +1210,6 @@ const handleCheckStepScore = async (stepId: number) => {
                           </Button>
                         </div>
                         <div className="flex items-center gap-2">
-                          {/* Show execution screenshot thumbnail if available, otherwise original step image */}
                           {getStepDisplayImage(step) && (
                             <div className="w-12 h-8 bg-muted rounded overflow-hidden">
                               <img
@@ -1218,6 +1272,58 @@ const handleCheckStepScore = async (stepId: number) => {
                           <p className="pl-4">{step.expectedOutput}</p>
                         </div>
                       )}
+
+                      {(step.objectImgUrl || step.relatedObjectImgUrl) && (
+                        <div className="flex gap-2 mb-2 pt-2 border-t">
+                          {step.objectImgUrl && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-xs text-muted-foreground">
+                                Object:
+                              </span>
+                              <div
+                                className="w-12 h-9 bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleImageClick(
+                                    step.objectImgUrl!,
+                                    `Step ${step.stepOrder} - Object Image`
+                                  );
+                                }}
+                              >
+                                <img
+                                  src={step.objectImgUrl}
+                                  alt="Object"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {step.relatedObjectImgUrl && (
+                            <div className="flex flex-col gap-1">
+                              <span className="text-xs text-muted-foreground">
+                                Related:
+                              </span>
+                              <div
+                                className="w-12 h-9 bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleImageClick(
+                                    step.relatedObjectImgUrl!,
+                                    `Step ${step.stepOrder} - Related Object`
+                                  );
+                                }}
+                              >
+                                <img
+                                  src={step.relatedObjectImgUrl}
+                                  alt="Related"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center text-xs text-muted-foreground">
                           <ImageIcon className="h-3 w-3 mr-1" />
@@ -1264,7 +1370,6 @@ const handleCheckStepScore = async (stepId: number) => {
           )}
         </div>
 
-        {/* Test Case Expected Output */}
         <div className="border-t p-4">
           <h3 className="font-semibold text-sm mb-2">
             Overall Expected Output
@@ -1304,7 +1409,6 @@ const handleCheckStepScore = async (stepId: number) => {
         </div>
       </div>
 
-      {/* Right Panel - Screenshot Display */}
       <div className="flex-1 flex flex-col">
         {selectedStep ? (
           <>
@@ -1331,6 +1435,56 @@ const handleCheckStepScore = async (stepId: number) => {
                         </p>
                       )}
                   </div>
+
+                  {(selectedStep.objectImgUrl ||
+                    selectedStep.relatedObjectImgUrl) && (
+                    <div className="flex gap-3 mt-3">
+                      {selectedStep.objectImgUrl && (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground font-medium">
+                            Object Image:
+                          </span>
+                          <div
+                            className="bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                            onClick={() =>
+                              handleImageClick(
+                                selectedStep.objectImgUrl!,
+                                `Step ${selectedStep.stepOrder} - Object Image`
+                              )
+                            }
+                          >
+                            <img
+                              src={selectedStep.objectImgUrl}
+                              alt="Object"
+                              className="w-auto h-auto max-w-full max-h-full object-contain"
+                            />
+                          </div>
+                        </div>
+                      )}
+                      {selectedStep.relatedObjectImgUrl && (
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground font-medium">
+                            Related Object Image:
+                          </span>
+                          <div
+                            className="bg-muted rounded overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                            onClick={() =>
+                              handleImageClick(
+                                selectedStep.relatedObjectImgUrl!,
+                                `Step ${selectedStep.stepOrder} - Related Object`
+                              )
+                            }
+                          >
+                            <img
+                              src={selectedStep.relatedObjectImgUrl}
+                              alt="Related"
+                              className="w-auto h-auto max-w-full max-h-full object-contain"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge variant="outline">
@@ -1353,10 +1507,10 @@ const handleCheckStepScore = async (stepId: number) => {
                   <div className="flex items-center mb-2">
                     <Code className="h-4 w-4 mr-2" />
                     <span className="font-medium text-sm">Script Details:</span>
-                    <code className="text-xs bg-background p-2 rounded block whitespace-pre-wrap">
-                      {selectedStep.scriptCode}
-                    </code>
                   </div>
+                  <code className="text-xs bg-background p-2 rounded block whitespace-pre-wrap">
+                    {selectedStep.scriptCode}
+                  </code>
                 </div>
               )}
             </div>
@@ -1366,13 +1520,29 @@ const handleCheckStepScore = async (stepId: number) => {
                   <div className="aspect-video bg-gradient-to-br from-blue-50 to-indigo-100 rounded-lg flex items-center justify-center">
                     {getStepDisplayImage(selectedStep) ? (
                       <img
-                        src={getStepDisplayImage(selectedStep)}
+                        src={
+                          getStepDisplayImage(selectedStep) ||
+                          "/placeholder.svg"
+                        }
                         alt={`Step ${selectedStep.stepOrder} ${
                           isStepExecutionCompleted(selectedStep.id)
                             ? "execution"
                             : "design"
                         } screenshot`}
-                        className="w-full h-full object-contain rounded-lg"
+                        className="w-full h-full object-contain rounded-lg cursor-pointer"
+                        onClick={() => {
+                          const imageUrl = getStepDisplayImage(selectedStep);
+                          if (imageUrl) {
+                            handleImageClick(
+                              imageUrl,
+                              `Step ${selectedStep.stepOrder} - ${
+                                isStepExecutionCompleted(selectedStep.id)
+                                  ? "Execution"
+                                  : "Design"
+                              } Screenshot`
+                            );
+                          }
+                        }}
                       />
                     ) : (
                       <div className="text-center">
@@ -1408,7 +1578,6 @@ const handleCheckStepScore = async (stepId: number) => {
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Navigation Bar */}
       <nav className="border-b bg-card">
         <div className="flex h-16 items-center px-6">
           <Button variant="ghost" onClick={onBack} className="mr-4">
@@ -1467,6 +1636,15 @@ const handleCheckStepScore = async (stepId: number) => {
         step={editingStep}
         onSave={handleStepModalSave}
       />
+
+      {viewingImage && (
+        <ImageViewerModal
+          isOpen={imageViewerOpen}
+          onClose={handleCloseImageViewer}
+          imageUrl={viewingImage.url}
+          title={viewingImage.title}
+        />
+      )}
 
       {isScriptModalOpen && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center p-4 z-50">
