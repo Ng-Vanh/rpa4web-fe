@@ -1258,7 +1258,7 @@ export function TestCaseDetailScreen({
                     <CardContent className="pt-0">
                       <div className="flex items-start gap-3 mb-2">
                         <div className="flex-1">
-                          <p className="text-sm font-medium mb-1">
+                          <p className="text-sm font-medium mb-1 break-all whitespace-pre-wrap">
                             {step.actionDescription}
                           </p>
                           {step.inputData && (

@@ -308,7 +308,7 @@ export function StepEditModal({
                 setFormData({ ...formData, actionDescription: e.target.value })
               }
               placeholder="Enter step description..."
-              className="min-h-[80px]"
+              className="min-h-[80px] break-all whitespace-pre-wrap"
               required
             />
           </div>
