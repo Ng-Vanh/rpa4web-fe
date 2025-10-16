@@ -104,7 +104,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       for (let i = 0; i < scenariosState.length; i++) {
         const scenario = scenariosState[i]
         if (scenario.id) {
-          await checkScenarioHasTestCases(String(i))
+          await checkScenarioHasTestCases(scenario.id)
         }
       }
     }
@@ -114,13 +114,13 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     }
   }, [scenariosState])
 
-  const toggleTestCase = (index: number) => {
+  const toggleTestCase = (scenarioId: number) => {
     const newExpanded = new Set(expandedCases)
-    const indexStr = String(index)
-    if (newExpanded.has(indexStr)) {
-      newExpanded.delete(indexStr)
+    const scenarioKey = String(scenarioId)
+    if (newExpanded.has(scenarioKey)) {
+      newExpanded.delete(scenarioKey)
     } else {
-      newExpanded.add(indexStr)
+      newExpanded.add(scenarioKey)
     }
     setExpandedCases(newExpanded)
   }
@@ -352,6 +352,8 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario || !scenario.id) return
 
+    const scenarioKey = String(scenario.id)
+
     // Xác nhận trước khi xóa
     if (!confirm(`Bạn có chắc chắn muốn xóa scenario "${scenario.Title}" và tất cả test cases liên quan?`)) {
       return
@@ -363,7 +365,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       const isNewScenario = scenario.id < 0
       
       if (isNewScenario) {
-        // Chỉ xóa khỏi local state
+        // Chỉ xóa khỏi local state và dọn dẹp tất cả state liên quan
         setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
         setEditingScenario(null)
         setEditedScenarios(prev => {
@@ -371,6 +373,73 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
           delete newState[scenarioId]
           return newState
         })
+        
+        // Dọn dẹp tất cả state liên quan đến test cases
+        setExpandedCases(prev => {
+          const next = new Set(prev)
+          next.delete(scenarioKey)
+          return next
+        })
+        setGeneratedTestCases(prev => {
+          const next = { ...prev }
+          delete next[scenarioKey]
+          return next
+        })
+        setDatabaseTestCases(prev => {
+          const next = { ...prev }
+          delete next[scenarioKey]
+          return next
+        })
+        setScenariosWithTestCases(prev => {
+          const next = new Set(prev)
+          next.delete(scenarioKey)
+          return next
+        })
+        setExpandedTestCases(prev => {
+          const next = new Set(prev)
+          // Xóa tất cả expanded test cases liên quan đến scenario này
+          Array.from(prev).forEach(key => {
+            if (key.startsWith(`${scenarioKey}-`)) {
+              next.delete(key)
+            }
+          })
+          return next
+        })
+        
+        // Dọn dẹp các state edit liên quan
+        setEditedGeneratedTCs(prev => {
+          const newState = { ...prev }
+          Object.keys(newState).forEach(key => {
+            if (key.startsWith(`${scenarioKey}-`)) {
+              delete newState[key]
+            }
+          })
+          return newState
+        })
+        setEditedGeneratedSteps(prev => {
+          const newState = { ...prev }
+          Object.keys(newState).forEach(key => {
+            if (key.startsWith(`${scenarioKey}-`)) {
+              delete newState[key]
+            }
+          })
+          return newState
+        })
+        
+        // Dọn dẹp các state loading/editing liên quan
+        if (isGeneratingTC === scenarioKey) {
+          setIsGeneratingTC(null)
+        }
+        if (isLoadingDatabaseTC === scenarioKey) {
+          setIsLoadingDatabaseTC(null)
+        }
+        if (editingGeneratedTC && editingGeneratedTC.startsWith(`${scenarioKey}-`)) {
+          setEditingGeneratedTC(null)
+        }
+        if (isSavingGeneratedTC && isSavingGeneratedTC.startsWith(`${scenarioKey}-`)) {
+          setIsSavingGeneratedTC(null)
+        }
+        
         alert("Đã xóa scenario thành công!")
         return
       }
@@ -412,27 +481,97 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
         console.log("Scenario and all related test cases deleted successfully")
         // Cập nhật danh sách cục bộ, không reload trang
         setScenariosState(prev => prev.filter(s => s.id !== scenarioId))
+        
         // Dọn dẹp các state liên quan để tránh trùng/lưu vết trên UI
         setExpandedCases(prev => {
           const next = new Set(prev)
-          next.delete(scenario.S_id)
+          next.delete(scenarioKey)
           return next
         })
         setGeneratedTestCases(prev => {
           const next = { ...prev }
-          delete next[scenario.S_id]
+          delete next[scenarioKey]
           return next
         })
         setDatabaseTestCases(prev => {
           const next = { ...prev }
-          delete next[scenario.S_id]
+          delete next[scenarioKey]
           return next
         })
         setScenariosWithTestCases(prev => {
           const next = new Set(prev)
-          next.delete(scenario.S_id)
+          next.delete(scenarioKey)
           return next
         })
+        setExpandedTestCases(prev => {
+          const next = new Set(prev)
+          // Xóa tất cả expanded test cases liên quan đến scenario này
+          Array.from(prev).forEach(key => {
+            if (key.startsWith(`${scenarioKey}-`)) {
+              next.delete(key)
+            }
+          })
+          return next
+        })
+        
+        // Dọn dẹp các state edit liên quan
+        setEditedGeneratedTCs(prev => {
+          const newState = { ...prev }
+          Object.keys(newState).forEach(key => {
+            if (key.startsWith(`${scenarioKey}-`)) {
+              delete newState[key]
+            }
+          })
+          return newState
+        })
+        setEditedGeneratedSteps(prev => {
+          const newState = { ...prev }
+          Object.keys(newState).forEach(key => {
+            if (key.startsWith(`${scenarioKey}-`)) {
+              delete newState[key]
+            }
+          })
+          return newState
+        })
+        
+        // Dọn dẹp các state loading/editing liên quan
+        if (isGeneratingTC === scenarioKey) {
+          setIsGeneratingTC(null)
+        }
+        if (isLoadingDatabaseTC === scenarioKey) {
+          setIsLoadingDatabaseTC(null)
+        }
+        if (editingGeneratedTC && editingGeneratedTC.startsWith(`${scenarioKey}-`)) {
+          setEditingGeneratedTC(null)
+        }
+        if (isSavingGeneratedTC && isSavingGeneratedTC.startsWith(`${scenarioKey}-`)) {
+          setIsSavingGeneratedTC(null)
+        }
+        
+        // Dọn dẹp database test cases state nếu có
+        const currentDatabaseTCs = databaseTestCases[scenarioKey]
+        if (currentDatabaseTCs) {
+          currentDatabaseTCs.forEach(tc => {
+            setEditedDatabaseTCs(prev => {
+              const newState = { ...prev }
+              delete newState[tc.id]
+              return newState
+            })
+            setEditedDatabaseSteps(prev => {
+              const newState = { ...prev }
+              Object.keys(newState).forEach(key => {
+                if (key.startsWith(`${tc.id}-`)) {
+                  delete newState[key]
+                }
+              })
+              return newState
+            })
+            if (editingDatabaseTC === tc.id) {
+              setEditingDatabaseTC(null)
+            }
+          })
+        }
+        
         // Nếu đang edit item vừa bị xóa, thoát edit mode
         if (editingScenario === scenarioId) {
           setEditingScenario(null)
@@ -452,16 +591,15 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
 
   const handleGenerateTestCases = async (scenarioId: number) => {
     const scenario = scenarios.find(s => s.id === scenarioId)
-    if (!scenario) return
+    if (!scenario || !scenario.id) return
 
-    const scenarioIndex = scenarios.findIndex(s => s.id === scenarioId)
-    const indexKey = String(scenarioIndex) // Sử dụng index làm key
-    setIsGeneratingTC(indexKey)
+    const scenarioKey = String(scenario.id) // Sử dụng scenario.id làm key
+    setIsGeneratingTC(scenarioKey)
     try {
       const result = await generateTestCases(scenario)
       setGeneratedTestCases(prev => ({
         ...prev,
-        [indexKey]: result
+        [scenarioKey]: result
       }))
     } catch (error) {
       console.error("Error generating test cases:", error)
@@ -472,25 +610,25 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   }
 
 
-  const checkScenarioHasTestCases = async (indexKey: string) => {
-    if (!indexKey) return false
+  const checkScenarioHasTestCases = async (scenarioId: number) => {
+    if (!scenarioId) return false
 
     try {
-      const scenarioIndex = parseInt(indexKey)
-      const scenario = scenarios[scenarioIndex]
+      const scenario = scenarios.find(s => s.id === scenarioId)
       if (!scenario || !scenario.id) {
         return false
       }
 
       const testCases = await getTestCasesWithSteps(scenario.id)
       const hasTestCases = testCases && testCases.length > 0
+      const scenarioKey = String(scenario.id)
       
       setScenariosWithTestCases(prev => {
         const newSet = new Set(prev)
         if (hasTestCases) {
-          newSet.add(indexKey)
+          newSet.add(scenarioKey)
         } else {
-          newSet.delete(indexKey)
+          newSet.delete(scenarioKey)
         }
         return newSet
       })
@@ -502,17 +640,17 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     }
   }
 
-  const loadDatabaseTestCases = async (indexKey: string) => {
-    const scenarioIndex = parseInt(indexKey)
-    const scenario = scenarios[scenarioIndex]
+  const loadDatabaseTestCases = async (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario || !scenario.id) return
 
-    setIsLoadingDatabaseTC(indexKey)
+    const scenarioKey = String(scenario.id)
+    setIsLoadingDatabaseTC(scenarioKey)
     try {
       const testCases = await getTestCasesWithSteps(scenario.id)
       setDatabaseTestCases(prev => ({
         ...prev,
-        [indexKey]: testCases
+        [scenarioKey]: testCases
       }))
     } catch (error) {
       console.error("Error loading database test cases:", error)
@@ -541,12 +679,13 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     setExpandedTestCases(newExpanded)
   }
 
-  const handleEditGeneratedTestCase = (indexKey: string, tcIndex: number) => {
-    const generatedData = generatedTestCases[indexKey]
+  const handleEditGeneratedTestCase = (scenarioId: number, tcIndex: number) => {
+    const scenarioKey = String(scenarioId)
+    const generatedData = generatedTestCases[scenarioKey]
     if (!generatedData || !generatedData.test_cases[tcIndex]) return
 
     const testCase = generatedData.test_cases[tcIndex]
-    const editKey = `${indexKey}-${tcIndex}`
+    const editKey = `${scenarioKey}-${tcIndex}`
     
     setEditingGeneratedTC(editKey)
     setEditedGeneratedTCs(prev => ({
@@ -557,7 +696,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     // Initialize all steps in edit mode
     const stepsEditData: Record<string, any> = {}
     testCase.steps.forEach((step, stepIndex) => {
-      const stepKey = `${indexKey}-${tcIndex}-${stepIndex}`
+      const stepKey = `${scenarioKey}-${tcIndex}-${stepIndex}`
       stepsEditData[stepKey] = { ...step }
     })
     setEditedGeneratedSteps(prev => ({
@@ -586,18 +725,19 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     })
   }
 
-  const handleSaveEditGeneratedTC = (indexKey: string, tcIndex: number) => {
-    const editKey = `${indexKey}-${tcIndex}`
+  const handleSaveEditGeneratedTC = (scenarioId: number, tcIndex: number) => {
+    const scenarioKey = String(scenarioId)
+    const editKey = `${scenarioKey}-${tcIndex}`
     const editedTC = editedGeneratedTCs[editKey]
     if (!editedTC) return
 
     setGeneratedTestCases(prev => {
-      const current = prev[indexKey]
+      const current = prev[scenarioKey]
       if (!current) return prev
 
       const newTestCases = [...current.test_cases]
       const updatedSteps = newTestCases[tcIndex].steps.map((step, stepIndex) => {
-        const stepKey = `${indexKey}-${tcIndex}-${stepIndex}`
+        const stepKey = `${scenarioKey}-${tcIndex}-${stepIndex}`
         return editedGeneratedSteps[stepKey] || step
       })
       
@@ -608,7 +748,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
 
       return {
         ...prev,
-        [indexKey]: {
+        [scenarioKey]: {
           ...current,
           test_cases: newTestCases
         }
@@ -797,16 +937,16 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
         })
 
                   // Reload test cases để hiển thị steps mới
-                  let foundSId: string | null = null
+                  let foundScenarioId: number | null = null
                   for (const sId in databaseTestCases) {
                     const tc = databaseTestCases[sId].find(tc => tc.id === tcId)
                     if (tc) {
-                      foundSId = sId
+                      foundScenarioId = parseInt(sId)
                       break
                     }
                   }
-                  if (foundSId) {
-                    await loadDatabaseTestCases(foundSId)
+                  if (foundScenarioId) {
+                    await loadDatabaseTestCases(foundScenarioId)
                   }
                   
                   alert("Đã cập nhật test case và tất cả steps thành công!")
@@ -1043,13 +1183,14 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     })
   }
 
-  const handleDeleteGeneratedTestCase = (indexKey: string, tcIndex: number) => {
+  const handleDeleteGeneratedTestCase = (scenarioId: number, tcIndex: number) => {
     if (!confirm("Bạn có chắc chắn muốn xóa test case này?")) {
       return
     }
 
+    const scenarioKey = String(scenarioId)
     setGeneratedTestCases(prev => {
-      const current = prev[indexKey]
+      const current = prev[scenarioKey]
       if (!current) return prev
 
       const newTestCases = current.test_cases.filter((_, index) => index !== tcIndex)
@@ -1057,13 +1198,13 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       if (newTestCases.length === 0) {
         // Nếu không còn test case nào, xóa luôn entry
         const newState = { ...prev }
-        delete newState[indexKey]
+        delete newState[scenarioKey]
         return newState
       }
 
       return {
         ...prev,
-        [indexKey]: {
+        [scenarioKey]: {
           ...current,
           test_cases: newTestCases
         }
@@ -1075,13 +1216,12 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     const scenario = scenarios.find(s => s.id === scenarioId)
     if (!scenario || !scenario.id) return
 
-    const scenarioIndex = scenarios.findIndex(s => s.id === scenarioId)
-    const indexKey = String(scenarioIndex)
-    const generatedData = generatedTestCases[indexKey]
+    const scenarioKey = String(scenario.id)
+    const generatedData = generatedTestCases[scenarioKey]
     if (!generatedData || !generatedData.test_cases[tcIndex]) return
 
     const testCase = generatedData.test_cases[tcIndex]
-    const loadingKey = `${indexKey}-${tcIndex}`
+    const loadingKey = `${scenarioKey}-${tcIndex}`
 
     setIsSavingGeneratedTC(loadingKey)
     try {
@@ -1089,14 +1229,14 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       await createTestCaseWithSteps(scenario.id, [testCase])
       
       // Load lại database test cases để hiển thị
-      await loadDatabaseTestCases(indexKey)
+      await loadDatabaseTestCases(scenario.id)
       
       // Update scenarios with test cases
-      setScenariosWithTestCases(prev => new Set(prev).add(indexKey))
+      setScenariosWithTestCases(prev => new Set(prev).add(scenarioKey))
       
       // Xóa test case khỏi generated list
       setGeneratedTestCases(prev => {
-        const current = prev[indexKey]
+        const current = prev[scenarioKey]
         if (!current) return prev
 
         const newTestCases = current.test_cases.filter((_, index) => index !== tcIndex)
@@ -1104,13 +1244,13 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
         if (newTestCases.length === 0) {
           // Nếu không còn test case nào, xóa luôn entry
           const newState = { ...prev }
-          delete newState[indexKey]
+          delete newState[scenarioKey]
           return newState
         }
 
         return {
           ...prev,
-          [indexKey]: {
+          [scenarioKey]: {
             ...current,
             test_cases: newTestCases
           }
@@ -1218,7 +1358,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
 
         <div className="space-y-6">
           {scenarios.map((scenario, index) => {
-            const isExpanded = expandedCases.has(String(index))
+            const isExpanded = scenario.id ? expandedCases.has(String(scenario.id)) : false
             const isEditing = editingScenario === scenario.id
             const editedScenario = scenario.id ? editedScenarios[scenario.id] || scenario : scenario
             
@@ -1303,10 +1443,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                             variant="ghost"
                             size="sm"
                             onClick={() => handleGenerateTestCases(scenario.id!)}
-                            disabled={isGeneratingTC === String(index)}
+                            disabled={isGeneratingTC === String(scenario.id)}
                             className="text-gray-500 hover:text-gray-700"
                           >
-                            {isGeneratingTC === String(index) ? (
+                            {isGeneratingTC === String(scenario.id) ? (
                               <>
                                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                                 Generating...
@@ -1407,14 +1547,14 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                   </div>
 
                   {/* Generated Test Cases */}
-                  {generatedTestCases[String(index)] && (
+                  {scenario.id && generatedTestCases[String(scenario.id)] && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Generated TCs:</span>
                         <div className="flex-1">
                           <div className="space-y-3">
-                            {generatedTestCases[String(index)].test_cases.map((testCase, tcIndex) => {
-                              const editKey = `${index}-${tcIndex}`
+                            {generatedTestCases[String(scenario.id)].test_cases.map((testCase, tcIndex) => {
+                              const editKey = `${scenario.id}-${tcIndex}`
                               const isEditing = editingGeneratedTC === editKey
                               const editedTC = editedGeneratedTCs[editKey] || testCase
                               
@@ -1461,7 +1601,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleSaveEditGeneratedTC(String(index), tcIndex)}
+                                            onClick={() => handleSaveEditGeneratedTC(scenario.id!, tcIndex)}
                                             className="text-green-600 hover:text-green-700"
                                           >
                                             <Save className="h-3 w-3 mr-1" />
@@ -1483,10 +1623,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                             variant="ghost"
                                             size="sm"
                                             onClick={() => handleSaveGeneratedTestCaseToDB(scenario.id!, tcIndex)}
-                                            disabled={isSavingGeneratedTC === `${index}-${tcIndex}`}
+                                            disabled={isSavingGeneratedTC === `${scenario.id}-${tcIndex}`}
                                             className="bg-green-600 hover:bg-green-700 text-white"
                                           >
-                                            {isSavingGeneratedTC === `${index}-${tcIndex}` ? (
+                                            {isSavingGeneratedTC === `${scenario.id}-${tcIndex}` ? (
                                               <>
                                                 <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                                                 Saving...
@@ -1501,7 +1641,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleDeleteGeneratedTestCase(String(index), tcIndex)}
+                                            onClick={() => handleDeleteGeneratedTestCase(scenario.id!, tcIndex)}
                                             className="text-red-600 hover:text-red-700"
                                           >
                                             <Trash2 className="h-3 w-3 mr-1" />
@@ -1512,15 +1652,15 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => toggleGeneratedTestCaseExpansion(`${index}-generated-${tcIndex}`)}
+                                        onClick={() => toggleGeneratedTestCaseExpansion(`${scenario.id}-generated-${tcIndex}`)}
                                         className="text-gray-500 hover:text-gray-700"
                                       >
-                                        {expandedTestCases.has(`${index}-generated-${tcIndex}`) ? 'Collapse' : 'Expand'}
+                                        {expandedTestCases.has(`${scenario.id}-generated-${tcIndex}`) ? 'Collapse' : 'Expand'}
                                       </Button>
                                     </div>
                                   </div>
                                   
-                                  {expandedTestCases.has(`${index}-generated-${tcIndex}`) && (
+                                  {expandedTestCases.has(`${scenario.id}-generated-${tcIndex}`) && (
                                     <div className="space-y-2">
                                       <div className="text-sm text-gray-600 mb-3">
                                         <strong>Steps ({testCase.steps.length}):</strong>
@@ -1550,7 +1690,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                               </div>
                                               <div className="flex-1 space-y-2">
                                                 <div>
-                                                  <span className="font-medium text-gray-900">Action:</span>
+                                                  <span className="font-medium text-gray-900">Action: </span>
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={editedStep.action_description}
@@ -1560,11 +1700,11 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                       rows={2}
                                                     />
                                                   ) : (
-                                                    <p className="text-gray-700 mt-1">{step.action_description}</p>
+                                                    <span className="text-gray-700">{step.action_description}</span>
                                                   )}
                                                 </div>
                                                 <div>
-                                                  <span className="font-medium text-gray-900">Input Data:</span>
+                                                  <span className="font-medium text-gray-900">Input Data: </span>
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={typeof editedStep.input_data === 'string' ? editedStep.input_data : JSON.stringify(editedStep.input_data)}
@@ -1582,16 +1722,16 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                     />
                                                   ) : (
                                                     step.input_data && Object.keys(step.input_data).length > 0 ? (
-                                                      <p className="text-gray-700 mt-1 text-sm bg-gray-50 p-2 rounded">
+                                                      <span className="text-gray-700 text-sm bg-gray-50 p-2 rounded">
                                                         {JSON.stringify(step.input_data)}
-                                                      </p>
+                                                      </span>
                                                     ) : (
-                                                      <p className="text-gray-500 mt-1 text-sm italic">No input data</p>
+                                                      <span className="text-gray-500 text-sm italic">No input data</span>
                                                     )
                                                   )}
                                                 </div>
                                                 <div>
-                                                  <span className="font-medium text-gray-900">Expected Output:</span>
+                                                  <span className="font-medium text-gray-900">Expected Output: </span>
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={editedStep.expected_output}
@@ -1601,7 +1741,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                       rows={2}
                                                     />
                                                   ) : (
-                                                    <p className="text-gray-700 mt-1">{step.expected_output}</p>
+                                                    <span className="text-gray-700">{step.expected_output}</span>
                                                   )}
                                                 </div>
                                               </div>
@@ -1622,13 +1762,13 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                   )}
 
                   {/* Database Test Cases */}
-                  {databaseTestCases[String(index)] && databaseTestCases[String(index)].length > 0 && (
+                  {scenario.id && databaseTestCases[String(scenario.id)] && databaseTestCases[String(scenario.id)].length > 0 && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
                         <div className="flex-1">
                           <div className="space-y-3">
-                            {databaseTestCases[String(index)].map((testCase, tcIndex) => {
+                            {databaseTestCases[String(scenario.id)].map((testCase, tcIndex) => {
                               const isEditing = editingDatabaseTC === testCase.id
                               const editedTC = editedDatabaseTCs[testCase.id] || testCase
                               
@@ -1716,15 +1856,15 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => toggleTestCaseExpansion(`${index}-${testCase.id}`)}
+                                        onClick={() => toggleTestCaseExpansion(`${scenario.id}-${testCase.id}`)}
                                         className="text-gray-500 hover:text-gray-700"
                                       >
-                                        {expandedTestCases.has(`${index}-${testCase.id}`) ? 'Collapse' : 'Expand'}
+                                        {expandedTestCases.has(`${scenario.id}-${testCase.id}`) ? 'Collapse' : 'Expand'}
                                       </Button>
                                     </div>
                                   </div>
                                   
-                                  {expandedTestCases.has(`${index}-${testCase.id}`) && (
+                                  {expandedTestCases.has(`${scenario.id}-${testCase.id}`) && (
                                     <div className="space-y-2">
                                       <div className="text-sm text-gray-600 mb-3">
                                         <strong>Steps ({getCurrentStepsForTestCase(testCase.id).length}):</strong>
@@ -1756,7 +1896,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                               </div>
                                               <div className="flex-1 space-y-2">
                                                 <div>
-                                                  <span className="font-medium text-gray-900">Action:</span>
+                                                  <span className="font-medium text-gray-900">Action: </span>
                                                   {isEditingStep ? (
                                                     <div className="flex items-start space-x-2">
                                                       <Textarea
@@ -1776,11 +1916,11 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                       </Button>
                                                     </div>
                                                   ) : (
-                                                    <p className="text-gray-700 mt-1">{step.actionDescription}</p>
+                                                    <span className="text-gray-700">{step.actionDescription}</span>
                                                   )}
                                                 </div>
                                                 <div>
-                                                  <span className="font-medium text-gray-900">Input Data:</span>
+                                                  <span className="font-medium text-gray-900">Input Data: </span>
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={editedStep.inputData}
@@ -1791,16 +1931,16 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                     />
                                                   ) : (
                                                     step.inputData && step.inputData !== '{}' ? (
-                                                      <p className="text-gray-700 mt-1 text-sm bg-gray-50 p-2 rounded">
+                                                      <span className="text-gray-700 text-sm bg-gray-50 p-2 rounded">
                                                         {step.inputData}
-                                                      </p>
+                                                      </span>
                                                     ) : (
-                                                      <p className="text-gray-500 mt-1 text-sm italic">No input data</p>
+                                                      <span className="text-gray-500 text-sm italic">No input data</span>
                                                     )
                                                   )}
                                                 </div>
                                                 <div>
-                                                  <span className="font-medium text-gray-900">Expected Output:</span>
+                                                  <span className="font-medium text-gray-900">Expected Output: </span>
                                                   {isEditingStep ? (
                                                     <Textarea
                                                       value={editedStep.expectedOutput}
@@ -1810,7 +1950,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                       rows={2}
                                                     />
                                                   ) : (
-                                                    <p className="text-gray-700 mt-1">{step.expectedOutput}</p>
+                                                    <span className="text-gray-700">{step.expectedOutput}</span>
                                                   )}
                                                 </div>
                                               </div>
@@ -1846,7 +1986,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                   )}
 
                   {/* Load Database Test Cases Button */}
-                  {!databaseTestCases[String(index)] && scenario.id && scenariosWithTestCases.has(String(index)) && (
+                  {scenario.id && !databaseTestCases[String(scenario.id)] && scenariosWithTestCases.has(String(scenario.id)) && (
                     <div className="mb-4">
                       <div className="flex items-start space-x-2">
                         <span className="font-semibold text-gray-700 min-w-[100px]">Saved TCs:</span>
@@ -1854,11 +1994,11 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => loadDatabaseTestCases(String(index))}
-                            disabled={isLoadingDatabaseTC === String(index)}
+                            onClick={() => loadDatabaseTestCases(scenario.id!)}
+                            disabled={isLoadingDatabaseTC === String(scenario.id)}
                             className="text-blue-600 hover:text-blue-700"
                           >
-                            {isLoadingDatabaseTC === String(index) ? (
+                            {isLoadingDatabaseTC === String(scenario.id) ? (
                               <>
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                                 Loading...
