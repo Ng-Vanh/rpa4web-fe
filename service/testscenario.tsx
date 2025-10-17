@@ -32,5 +32,20 @@ const getTestScenarioById = async (id: number) => {
         throw error;
     }
 }
+const createTestScenario = async (testScenarioData: any) => {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/scenarios`, testScenarioData, {
+            headers: {
+                'Content-Type': 'application/json',
+                ...getAuthHeaders(),
+            },
+        });
+        console.log('Created test scenario:', response.data);
+        return response.data;
+    } catch (error) {
+        console.error("Error creating test scenario:", error);
+        throw error;
+    }
+}
 
-export { getListTestScenarios, getTestScenarioById };
+export { getListTestScenarios, getTestScenarioById, createTestScenario };
