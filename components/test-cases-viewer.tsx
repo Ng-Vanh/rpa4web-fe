@@ -6,10 +6,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check, Plus } from "lucide-react"
+import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check, Plus, Split, FileText } from "lucide-react"
 import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase, deleteTestCase } from "@/service/testcase"
 import { updateTestCaseStep, deleteTestCaseStep, createNewTestCaseStep } from "@/service/testcase-step"
 import { getAuthHeaders } from "@/service/auth-utils"
+import { getSrsPreview } from "@/service/srs_document"
+import { PDFViewerWithHighlight } from "@/components/pdf-viewer-with-highlight"
 
 interface Scenario {
   UC_id: string
@@ -92,11 +94,134 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const [editedGeneratedSteps, setEditedGeneratedSteps] = useState<Record<string, any>>({})
   const [editedDatabaseSteps, setEditedDatabaseSteps] = useState<Record<string, any>>({})
   const [scenariosWithTestCases, setScenariosWithTestCases] = useState<Set<string>>(new Set())
+  const [isSplitView, setIsSplitView] = useState(false)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [selectedUcId, setSelectedUcId] = useState<string | null>(null)
+  const [pdfLoading, setPdfLoading] = useState(false)
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
     setScenariosState(data.scenarios || [])
   }, [data.scenarios])
+
+  // Load PDF khi split view được bật
+  useEffect(() => {
+    if (isSplitView && srsId && !pdfUrl) {
+      loadPdf()
+    }
+  }, [isSplitView, srsId])
+
+  // Cleanup PDF URL khi component unmount
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl)
+      }
+    }
+  }, [pdfUrl])
+
+  const loadPdf = async () => {
+    if (!srsId) return
+    
+    setPdfLoading(true)
+    try {
+      // Thử dùng direct URL từ API trước (nếu backend hỗ trợ)
+      const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL
+      const token = localStorage.getItem('token')
+      
+      // Nếu có token, có thể dùng direct URL (nhưng cần backend hỗ trợ token trong query param hoặc cookie)
+      // Hoặc dùng blob URL để đảm bảo authentication qua header
+      
+      // Option 1: Direct URL (nếu backend hỗ trợ)
+      // const url = token ? `${API_BASE_URL}/srs/${srsId}/preview?token=${token}` : `${API_BASE_URL}/srs/${srsId}/preview`
+      
+      // Option 2: Blob URL (đảm bảo auth qua header)
+      const blob = await getSrsPreview(srsId)
+      const url = URL.createObjectURL(blob)
+      setPdfUrl(url)
+    } catch (error: any) {
+      console.error("Error loading PDF:", error)
+      const errorMessage = error?.response?.data?.message || error?.message || "Không thể tải PDF"
+      console.error("PDF Error details:", {
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        data: error?.response?.data,
+        message: errorMessage
+      })
+      setPdfUrl(null)
+      // Không alert ngay, để user thấy message trong UI
+    } finally {
+      setPdfLoading(false)
+    }
+  }
+
+  const handleToggleSplitView = () => {
+    setIsSplitView(!isSplitView)
+    if (!isSplitView && srsId && !pdfUrl) {
+      loadPdf()
+    }
+  }
+
+  const handleUcIdClick = (ucId: string) => {
+    setSelectedUcId(ucId)
+    // Scroll đến phần tương ứng trong PDF
+    scrollToPdfSection(ucId)
+  }
+
+  const scrollToPdfSection = (ucId: string) => {
+    // Tìm và scroll đến phần có chứa UC_id trong PDF
+    // Lưu ý: Với embed/iframe PDF, việc tìm kiếm text phức tạp do:
+    // 1. PDF được render bởi browser's PDF viewer (không phải HTML)
+    // 2. Cross-origin restrictions không cho phép truy cập DOM
+    // 3. Cần sử dụng PDF.js hoặc API backend để extract text và tìm vị trí
+    
+    const embed = document.getElementById('pdf-viewer-iframe') as HTMLEmbedElement
+    if (!embed) return
+
+    // Cách 1: Sử dụng browser's built-in find (Ctrl+F) - không thể tự động
+    // Cách 2: Sử dụng PDF.js để render PDF thành HTML và tìm text
+    // Cách 3: Backend API trả về vị trí (page number, coordinates) của UC_id trong PDF
+    
+    // Hiện tại: Chỉ có thể highlight trong danh sách scenarios
+    // Để tìm trong PDF, cần:
+    // - Backend API: GET /srs/{id}/search?text={ucId} -> trả về page, coordinates
+    // - Hoặc sử dụng PDF.js để parse PDF và tìm text
+    
+    console.log(`Tìm kiếm UC_id "${ucId}" trong PDF - cần backend API hoặc PDF.js để thực hiện`)
+    
+    // Tạm thời: Scroll đến phần có chứa UC_id bằng cách tìm trong URL fragment
+    // Nếu PDF có bookmark/anchor, có thể dùng: pdfUrl#page=1&search=UC_id
+    // Nhưng browser's PDF viewer không hỗ trợ search parameter
+  }
+
+  const handleScenarioClick = (scenarioId: number) => {
+    const scenario = scenarios.find(s => s.id === scenarioId)
+    if (scenario && scenario.UC_id) {
+      handleUcIdClick(scenario.UC_id)
+      // Scroll đến scenario trong danh sách
+      const element = document.getElementById(`scenario-${scenarioId}`)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }
+
+  const handleHighlightClick = (ucId: string) => {
+    // Khi click vào highlight trong PDF, tìm scenario tương ứng và scroll đến
+    const scenario = scenarios.find(s => s.UC_id === ucId)
+    if (scenario && scenario.id) {
+      setSelectedUcId(ucId)
+      const element = document.getElementById(`scenario-${scenario.id}`)
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }
+  }
+
+  // Lấy danh sách tất cả UC_id để highlight
+  const getAllUcIds = () => {
+    return Array.from(new Set(scenarios.map(s => s.UC_id).filter(Boolean)))
+  }
 
   // Check scenarios có test case hay không khi scenarios thay đổi
   useEffect(() => {
@@ -1293,8 +1418,8 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const scenarios = scenariosState
 
   return (
-    <div className="min-h-screen bg-background">
-      <nav className="border-b bg-card">
+    <div className="h-screen bg-background flex flex-col overflow-hidden">
+      <nav className="border-b bg-card flex-shrink-0">
         <div className="flex h-16 items-center px-6">
           {onBack && (
             <Button variant="ghost" onClick={onBack} className="mr-4">
@@ -1304,6 +1429,15 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
           )}
           <h1 className="text-xl font-semibold">Generated Scenarios</h1>
           <div className="ml-auto flex space-x-2">
+            <Button
+              variant={isSplitView ? "default" : "outline"}
+              size="sm"
+              onClick={handleToggleSplitView}
+              className={isSplitView ? "bg-blue-600 text-white" : ""}
+            >
+              <Split className="h-4 w-4 mr-2" />
+              {isSplitView ? "Single View" : "Split View"}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -1338,7 +1472,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
         </div>
       </nav>
 
-      <div className="container mx-auto p-6">
+      <div className={`flex-1 flex ${isSplitView ? 'flex-row' : 'flex-col'} overflow-hidden min-h-0`}>
+        {/* Left side - Scenarios - Independent Scrollable Pane */}
+        <div className={`${isSplitView ? 'w-1/2' : 'w-full'} h-full overflow-y-auto overscroll-contain ${isSplitView ? 'border-r' : ''} bg-white`}>
+          <div className="container mx-auto p-6">
         <div className="mb-6">
           <Card>
             <CardHeader>
@@ -1363,7 +1500,11 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
             const editedScenario = scenario.id ? editedScenarios[scenario.id] || scenario : scenario
             
             return (
-              <Card key={scenario.id ?? scenario.S_id} className="hover:shadow-md transition-shadow">
+              <Card 
+                key={scenario.id ?? scenario.S_id} 
+                id={`scenario-${scenario.id}`}
+                className={`hover:shadow-md transition-shadow ${selectedUcId === scenario.UC_id ? 'ring-2 ring-blue-500' : ''}`}
+              >
                 <CardContent className="p-6">
                   {/* Header với S_id: Title (UC_id: "") */}
                   <div className="flex items-start justify-between mb-4">
@@ -1390,7 +1531,18 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           </div>
                         ) : (
                           <h3 className="text-lg font-semibold text-gray-900">
-                            <span className="font-mono text-blue-600">{index + 1}.</span> {scenario["Title"]} <span className="text-gray-500 text-sm">({scenario.UC_id})</span>
+                            <span className="font-mono text-blue-600">{index + 1}.</span> {scenario["Title"]} 
+                            <span 
+                              className={`text-sm ml-2 cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
+                                selectedUcId === scenario.UC_id 
+                                  ? 'text-blue-600 font-bold bg-blue-50 ring-2 ring-blue-300' 
+                                  : 'text-gray-500 hover:bg-gray-100'
+                              }`}
+                              onClick={() => scenario.id && handleScenarioClick(scenario.id)}
+                              title="Click để xem trong PDF"
+                            >
+                              ({scenario.UC_id})
+                            </span>
                           </h3>
                         )}
                       </div>
@@ -2064,6 +2216,89 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
             Add New Scenario
           </Button>
         </div>
+          </div>
+        </div>
+
+        {/* Right side - PDF Viewer - Independent Scrollable Pane */}
+        {isSplitView && (
+          <div className="w-1/2 h-full flex flex-col border-l bg-gray-50 overflow-hidden">
+            {/* Fixed Header */}
+            <div className="border-b bg-white p-4 flex items-center justify-between flex-shrink-0">
+              <div className="flex items-center space-x-2">
+                <FileText className="h-5 w-5 text-gray-600" />
+                <h2 className="text-lg font-semibold">SRS Document</h2>
+              </div>
+              {selectedUcId && (
+                <Badge variant="secondary" className="bg-blue-100 text-blue-800">
+                  Selected: {selectedUcId}
+                </Badge>
+              )}
+            </div>
+            {/* Fixed UC_id Quick Links */}
+            <div className="border-b bg-white p-2 overflow-x-auto flex-shrink-0">
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-semibold text-gray-600 whitespace-nowrap">UC IDs:</span>
+                <div className="flex space-x-1">
+                  {Array.from(new Set(scenarios.map(s => s.UC_id))).map((ucId) => (
+                    <button
+                      key={ucId}
+                      onClick={() => {
+                        const scenario = scenarios.find(s => s.UC_id === ucId)
+                        if (scenario && scenario.id) {
+                          handleScenarioClick(scenario.id)
+                        }
+                      }}
+                      className={`px-2 py-1 text-xs rounded transition-colors ${
+                        selectedUcId === ucId
+                          ? 'bg-blue-600 text-white font-semibold'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                      title={`Click để xem ${ucId} trong PDF và scroll đến scenario`}
+                    >
+                      {ucId}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* Scrollable PDF Content - Independent Scroll */}
+            <div className="flex-1 overflow-y-auto overscroll-contain min-h-0">
+              {pdfLoading ? (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="flex flex-col items-center space-y-4">
+                    <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                    <p className="text-gray-600">Đang tải PDF...</p>
+                  </div>
+                </div>
+              ) : pdfUrl ? (
+                <PDFViewerWithHighlight
+                  pdfUrl={pdfUrl}
+                  highlightTexts={getAllUcIds()}
+                  onHighlightClick={handleHighlightClick}
+                  selectedText={selectedUcId}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center text-gray-500">
+                    <FileText className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                    <p className="mb-2">Không thể tải PDF</p>
+                    <p className="text-sm text-gray-400">
+                      {srsId ? `SRS ID: ${srsId}` : "Không có SRS ID"}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadPdf}
+                      className="mt-4"
+                    >
+                      Thử lại
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
