@@ -98,6 +98,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [selectedUcId, setSelectedUcId] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
+  const [ucIdMatchIndex, setUcIdMatchIndex] = useState<Record<string, number>>({}) // Track match index cho mỗi UC_id
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
@@ -125,22 +126,28 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     
     setPdfLoading(true)
     try {
-      // Thử dùng direct URL từ API trước (nếu backend hỗ trợ)
-      const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL
-      const token = localStorage.getItem('token')
+      // Revoke blob URL cũ nếu có để tránh memory leak
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl)
+      }
       
-      // Nếu có token, có thể dùng direct URL (nhưng cần backend hỗ trợ token trong query param hoặc cookie)
-      // Hoặc dùng blob URL để đảm bảo authentication qua header
-      
-      // Option 1: Direct URL (nếu backend hỗ trợ)
-      // const url = token ? `${API_BASE_URL}/srs/${srsId}/preview?token=${token}` : `${API_BASE_URL}/srs/${srsId}/preview`
-      
-      // Option 2: Blob URL (đảm bảo auth qua header)
+      // Fetch PDF từ API
       const blob = await getSrsPreview(srsId)
+      
+      // Kiểm tra blob hợp lệ
+      if (!blob || blob.size === 0) {
+        throw new Error("PDF blob rỗng hoặc không hợp lệ")
+      }
+      
+      console.log("✅ PDF blob received, size:", blob.size, "bytes, type:", blob.type)
+      
+      // Tạo blob URL mới
       const url = URL.createObjectURL(blob)
+      console.log("✅ Blob URL created:", url)
+      
       setPdfUrl(url)
     } catch (error: any) {
-      console.error("Error loading PDF:", error)
+      console.error("❌ Error loading PDF:", error)
       const errorMessage = error?.response?.data?.message || error?.message || "Không thể tải PDF"
       console.error("PDF Error details:", {
         status: error?.response?.status,
@@ -163,35 +170,17 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   }
 
   const handleUcIdClick = (ucId: string) => {
+    // Cycle qua các matches của UC_id này
+    const currentIndex = ucIdMatchIndex[ucId] || 0
+    
+    // Tăng index để scroll đến match tiếp theo
+    // Index sẽ được reset về 0 khi vượt quá số lượng matches (xử lý trong PDF viewer)
+    setUcIdMatchIndex(prev => ({
+      ...prev,
+      [ucId]: currentIndex + 1
+    }))
+    
     setSelectedUcId(ucId)
-    // Scroll đến phần tương ứng trong PDF
-    scrollToPdfSection(ucId)
-  }
-
-  const scrollToPdfSection = (ucId: string) => {
-    // Tìm và scroll đến phần có chứa UC_id trong PDF
-    // Lưu ý: Với embed/iframe PDF, việc tìm kiếm text phức tạp do:
-    // 1. PDF được render bởi browser's PDF viewer (không phải HTML)
-    // 2. Cross-origin restrictions không cho phép truy cập DOM
-    // 3. Cần sử dụng PDF.js hoặc API backend để extract text và tìm vị trí
-    
-    const embed = document.getElementById('pdf-viewer-iframe') as HTMLEmbedElement
-    if (!embed) return
-
-    // Cách 1: Sử dụng browser's built-in find (Ctrl+F) - không thể tự động
-    // Cách 2: Sử dụng PDF.js để render PDF thành HTML và tìm text
-    // Cách 3: Backend API trả về vị trí (page number, coordinates) của UC_id trong PDF
-    
-    // Hiện tại: Chỉ có thể highlight trong danh sách scenarios
-    // Để tìm trong PDF, cần:
-    // - Backend API: GET /srs/{id}/search?text={ucId} -> trả về page, coordinates
-    // - Hoặc sử dụng PDF.js để parse PDF và tìm text
-    
-    console.log(`Tìm kiếm UC_id "${ucId}" trong PDF - cần backend API hoặc PDF.js để thực hiện`)
-    
-    // Tạm thời: Scroll đến phần có chứa UC_id bằng cách tìm trong URL fragment
-    // Nếu PDF có bookmark/anchor, có thể dùng: pdfUrl#page=1&search=UC_id
-    // Nhưng browser's PDF viewer không hỗ trợ search parameter
   }
 
   const handleScenarioClick = (scenarioId: number) => {
@@ -222,6 +211,16 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const getAllUcIds = () => {
     return Array.from(new Set(scenarios.map(s => s.UC_id).filter(Boolean)))
   }
+
+  // Cleanup blob URL khi component unmount hoặc pdfUrl thay đổi
+  useEffect(() => {
+    return () => {
+      if (pdfUrl && pdfUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(pdfUrl)
+        console.log("🧹 Cleaned up blob URL:", pdfUrl)
+      }
+    }
+  }, [pdfUrl])
 
   // Check scenarios có test case hay không khi scenarios thay đổi
   useEffect(() => {
@@ -1538,8 +1537,12 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                   ? 'text-blue-600 font-bold bg-blue-50 ring-2 ring-blue-300' 
                                   : 'text-gray-500 hover:bg-gray-100'
                               }`}
-                              onClick={() => scenario.id && handleScenarioClick(scenario.id)}
-                              title="Click để xem trong PDF"
+                              onClick={() => {
+                                if (scenario.UC_id) {
+                                  handleUcIdClick(scenario.UC_id)
+                                }
+                              }}
+                              title="Click để scroll đến phần khớp trong PDF (click nhiều lần để xem các match khác)"
                             >
                               ({scenario.UC_id})
                             </span>
@@ -2276,6 +2279,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                   highlightTexts={getAllUcIds()}
                   onHighlightClick={handleHighlightClick}
                   selectedText={selectedUcId}
+                  selectedTextMatchIndex={selectedUcId ? (ucIdMatchIndex[selectedUcId] || 0) : 0}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">

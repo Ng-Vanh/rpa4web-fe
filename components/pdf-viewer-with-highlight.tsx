@@ -180,6 +180,7 @@ interface PDFViewerWithHighlightProps {
   highlightTexts: string[] // Danh sách UC_id cần highlight
   onHighlightClick?: (text: string) => void // Callback khi click vào highlight
   selectedText?: string | null // UC_id đang được chọn
+  selectedTextMatchIndex?: number // Index của match hiện tại cho selectedText
 }
 
 interface TextItem {
@@ -192,11 +193,22 @@ interface TextItem {
   ucId?: string // UC_id khớp với text này
 }
 
+interface MatchLocation {
+  pageNum: number
+  x: number
+  y: number
+  width: number
+  height: number
+  text: string
+  ucId: string
+}
+
 export function PDFViewerWithHighlight({
   pdfUrl,
   highlightTexts,
   onHighlightClick,
   selectedText,
+  selectedTextMatchIndex = 0,
 }: PDFViewerWithHighlightProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
@@ -204,6 +216,7 @@ export function PDFViewerWithHighlight({
   const [pdfDoc, setPdfDoc] = useState<any>(null)
   const [totalPages, setTotalPages] = useState(0)
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
+  const [allMatches, setAllMatches] = useState<Record<string, MatchLocation[]>>({}) // Lưu tất cả matches cho mỗi UC_id
 
   // Load PDF
   useEffect(() => {
@@ -237,17 +250,33 @@ export function PDFViewerWithHighlight({
         if (pdfUrl.startsWith('blob:')) {
           try {
             // Fetch blob và convert sang ArrayBuffer
-            const response = await fetch(pdfUrl)
+            const response = await fetch(pdfUrl, {
+              method: 'GET',
+              headers: {
+                'Accept': 'application/pdf',
+              },
+            })
+            
             if (!response.ok) {
-              throw new Error(`Không thể fetch blob URL: ${response.status}`)
+              throw new Error(`Không thể fetch blob URL: ${response.status} ${response.statusText}`)
             }
+            
             const arrayBuffer = await response.arrayBuffer()
-            pdfSource = { data: arrayBuffer }
-            console.log("PDF loaded from blob as ArrayBuffer, size:", arrayBuffer.byteLength)
+            
+            if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+              throw new Error("Blob URL trả về dữ liệu rỗng")
+            }
+            
+            pdfSource = { data: new Uint8Array(arrayBuffer) }
+            console.log("✅ PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes")
           } catch (fetchError: any) {
-            console.error("Error fetching blob URL:", fetchError)
-            // Fallback: thử dùng URL trực tiếp
-            pdfSource = { url: pdfUrl }
+            console.error("❌ Error fetching blob URL:", fetchError)
+            console.error("Error details:", {
+              message: fetchError?.message,
+              name: fetchError?.name,
+              stack: fetchError?.stack,
+            })
+            throw new Error(`Không thể load PDF từ blob URL: ${fetchError?.message || 'Unknown error'}`)
           }
         } else {
           pdfSource = { url: pdfUrl }
@@ -257,6 +286,7 @@ export function PDFViewerWithHighlight({
           ...pdfSource,
           cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version || '3.11.174'}/cmaps/`,
           cMapPacked: true,
+          verbosity: 0, // Giảm log
         })
 
         const pdf = await loadingTask.promise
@@ -277,9 +307,9 @@ export function PDFViewerWithHighlight({
     loadPdf()
   }, [pdfUrl])
 
-  // Render pages - đơn giản hóa, chỉ hiển thị PDF
+  // Render pages và extract text để highlight
   useEffect(() => {
-    if (!pdfDoc || !containerRef.current) return
+    if (!pdfDoc || !containerRef.current || !highlightTexts || highlightTexts.length === 0) return
 
     const renderPages = async () => {
       // Clear container trước khi render
@@ -287,9 +317,16 @@ export function PDFViewerWithHighlight({
         containerRef.current.innerHTML = ""
       }
 
+      const matchesByUcId: Record<string, MatchLocation[]> = {}
+      const pdfjs = await loadPdfJs()
+      if (!pdfjs) {
+        console.error("PDF.js not loaded")
+        return
+      }
+
       for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
         const page = await pdfDoc.getPage(pageNum)
-        const viewport = page.getViewport({ scale: 1.5 }) // Giảm scale để load nhanh hơn
+        const viewport = page.getViewport({ scale: 1.5 })
 
         // Tạo canvas cho mỗi trang
         const canvas = document.createElement("canvas")
@@ -308,26 +345,204 @@ export function PDFViewerWithHighlight({
         }
         await page.render(renderContext).promise
 
-        // Thêm canvas vào container
+        // Extract text từ page để tìm UC_id
+        const textContent = await page.getTextContent()
+        const linesMap = new Map<number, any[]>()
+
+        // Group text items by line
+        textContent.items.forEach((item: any) => {
+          if (item.str && item.str.trim()) {
+            const tx = pdfjs.Util.transform(viewport.transform, item.transform)
+            const y = Math.round(tx[5])
+            
+            if (!linesMap.has(y)) {
+              linesMap.set(y, [])
+            }
+            
+            linesMap.get(y)!.push({
+              str: item.str,
+              x: tx[4],
+              y: tx[5],
+              width: item.width || 0,
+              height: item.height || 0,
+            })
+          }
+        })
+
+        // Tìm UC_id trong từng line
+        linesMap.forEach((lineItems, yKey) => {
+          lineItems.sort((a, b) => a.x - b.x)
+          const lineText = lineItems.map((item) => item.str).join(" ")
+          
+          // Tìm UC_id trong line text
+          for (const ucId of highlightTexts) {
+            if (!ucId || !ucId.trim()) continue
+            
+            const ucIdLower = ucId.toLowerCase().trim()
+            const lineTextLower = lineText.toLowerCase()
+            
+            const index = lineTextLower.indexOf(ucIdLower)
+            if (index !== -1) {
+              // Tính toán vị trí highlight
+              let currentTextPos = 0
+              let highlightStartX = lineItems[0].x
+              let highlightEndX = lineItems[lineItems.length - 1].x + lineItems[lineItems.length - 1].width
+              let foundStart = false
+              
+              for (const item of lineItems) {
+                const itemTextLength = item.str.length
+                
+                if (!foundStart && currentTextPos + itemTextLength > index) {
+                  const offsetInItem = index - currentTextPos
+                  highlightStartX = item.x + (offsetInItem / itemTextLength) * item.width
+                  foundStart = true
+                }
+                
+                if (currentTextPos + itemTextLength >= index + ucId.length) {
+                  const offsetInItem = index + ucId.length - currentTextPos
+                  highlightEndX = item.x + (offsetInItem / itemTextLength) * item.width
+                  break
+                }
+                
+                currentTextPos += itemTextLength + 1
+              }
+              
+              const avgY = lineItems.reduce((sum, item) => sum + item.y, 0) / lineItems.length
+              const maxHeight = Math.max(...lineItems.map((item) => item.height))
+              
+              // Lưu match location
+              if (!matchesByUcId[ucId]) {
+                matchesByUcId[ucId] = []
+              }
+              
+              matchesByUcId[ucId].push({
+                pageNum: pageNum,
+                x: highlightStartX,
+                y: avgY,
+                width: Math.max(highlightEndX - highlightStartX, 30),
+                height: maxHeight,
+                text: lineText.substring(index, index + ucId.length),
+                ucId: ucId,
+              })
+            }
+          }
+        })
+
+        // Tạo page container với overlay cho highlights
         const pageContainer = document.createElement("div")
-        pageContainer.className = "flex justify-center mb-4"
+        pageContainer.className = "relative flex justify-center mb-4"
         pageContainer.id = `pdf-page-container-${pageNum}`
 
+        const overlay = document.createElement("div")
+        overlay.className = "absolute top-0 left-0 pointer-events-none"
+        overlay.style.width = `${viewport.width}px`
+        overlay.style.height = `${viewport.height}px`
+        overlay.id = `pdf-overlay-${pageNum}`
+
         pageContainer.appendChild(canvas)
+        pageContainer.appendChild(overlay)
         
-        // Check containerRef trước khi append
         if (containerRef.current) {
           containerRef.current.appendChild(pageContainer)
         }
 
         canvasRefs.current.set(pageNum, canvas)
       }
+
+      // Lưu tất cả matches
+      setAllMatches(matchesByUcId)
+      console.log("✅ Matches found:", matchesByUcId)
+      
+      // Vẽ highlights
+      drawHighlights(matchesByUcId)
     }
 
     renderPages()
-  }, [pdfDoc, totalPages])
+  }, [pdfDoc, totalPages, highlightTexts])
 
-  // Tạm thời bỏ highlight - chỉ hiển thị PDF
+  // Draw highlights với màu cam
+  const drawHighlights = (matches: Record<string, MatchLocation[]>) => {
+    // Clear existing highlights
+    for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+      const overlay = document.getElementById(`pdf-overlay-${pageNum}`)
+      if (overlay) {
+        overlay.innerHTML = ""
+      }
+    }
+
+    // Vẽ highlights cho tất cả matches
+    Object.keys(matches).forEach((ucId) => {
+      matches[ucId].forEach((match, index) => {
+        const overlay = document.getElementById(`pdf-overlay-${match.pageNum}`)
+        if (!overlay) return
+
+        const highlight = document.createElement("div")
+        highlight.setAttribute('data-uc-id', ucId)
+        highlight.setAttribute('data-match-index', String(index))
+        highlight.className = `absolute cursor-pointer transition-all ${
+          selectedText === ucId
+            ? "bg-orange-400 opacity-90 ring-2 ring-blue-500"
+            : "bg-orange-300 opacity-70 hover:opacity-90"
+        }`
+        highlight.style.left = `${match.x}px`
+        highlight.style.top = `${match.y - match.height}px`
+        highlight.style.width = `${Math.max(match.width, 30)}px`
+        highlight.style.height = `${Math.max(match.height, 15)}px`
+        highlight.style.pointerEvents = "auto"
+        highlight.title = `UC_id: ${ucId} (${index + 1}/${matches[ucId].length}) - Click để scroll đến scenario`
+        highlight.onclick = () => {
+          if (onHighlightClick) {
+            onHighlightClick(ucId)
+          }
+        }
+
+        overlay.appendChild(highlight)
+      })
+    })
+  }
+
+  // Re-draw highlights khi selectedText thay đổi
+  useEffect(() => {
+    if (Object.keys(allMatches).length > 0) {
+      drawHighlights(allMatches)
+    }
+  }, [selectedText, allMatches, totalPages])
+
+  // Scroll to match khi selectedText hoặc selectedTextMatchIndex thay đổi
+  useEffect(() => {
+    if (selectedText && allMatches[selectedText] && allMatches[selectedText].length > 0) {
+      // Sử dụng selectedTextMatchIndex từ props, nếu không có thì dùng 0
+      const index = selectedTextMatchIndex !== undefined ? selectedTextMatchIndex : 0
+      const actualIndex = index % allMatches[selectedText].length // Cycle nếu vượt quá
+      const match = allMatches[selectedText][actualIndex]
+      
+      if (match) {
+        const pageContainer = document.getElementById(`pdf-page-container-${match.pageNum}`)
+        if (pageContainer) {
+          // Scroll đến page container
+          pageContainer.scrollIntoView({ behavior: "smooth", block: "center" })
+          
+          // Highlight match hiện tại (làm nổi bật hơn)
+          setTimeout(() => {
+            const overlay = document.getElementById(`pdf-overlay-${match.pageNum}`)
+            if (overlay) {
+              const highlights = overlay.querySelectorAll('div[data-uc-id]')
+              highlights.forEach((hl: any) => {
+                if (hl.getAttribute('data-uc-id') === selectedText && 
+                    hl.getAttribute('data-match-index') === String(actualIndex)) {
+                  hl.classList.add('ring-4', 'ring-blue-500')
+                  hl.style.zIndex = '10'
+                } else {
+                  hl.classList.remove('ring-4', 'ring-blue-500')
+                  hl.style.zIndex = '1'
+                }
+              })
+            }
+          }, 300)
+        }
+      }
+    }
+  }, [selectedText, selectedTextMatchIndex, allMatches])
 
   if (loading) {
     return (
