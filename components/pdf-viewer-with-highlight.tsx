@@ -244,39 +244,70 @@ export function PDFViewerWithHighlight({
         }
 
         // Load PDF từ blob URL
-        // Với blob URL, cần convert sang ArrayBuffer để tránh lỗi
+        // Với blob URL, thử dùng URL trực tiếp trước, nếu không được thì mới convert
         let pdfSource: any
         
         if (pdfUrl.startsWith('blob:')) {
           try {
-            // Fetch blob và convert sang ArrayBuffer
-            const response = await fetch(pdfUrl, {
-              method: 'GET',
-              headers: {
-                'Accept': 'application/pdf',
-              },
+            // Thử dùng URL trực tiếp trước (nhanh hơn, ít tốn memory hơn)
+            pdfSource = { url: pdfUrl }
+            console.log("✅ Using blob URL directly for PDF.js")
+            
+            // Test xem URL có hoạt động không bằng cách thử load
+            const testTask = pdfjs.getDocument({
+              url: pdfUrl,
+              cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version || '3.11.174'}/cmaps/`,
+              cMapPacked: true,
+              verbosity: 0,
             })
             
-            if (!response.ok) {
-              throw new Error(`Không thể fetch blob URL: ${response.status} ${response.statusText}`)
-            }
-            
-            const arrayBuffer = await response.arrayBuffer()
-            
-            if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-              throw new Error("Blob URL trả về dữ liệu rỗng")
-            }
-            
-            pdfSource = { data: new Uint8Array(arrayBuffer) }
-            console.log("✅ PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes")
-          } catch (fetchError: any) {
-            console.error("❌ Error fetching blob URL:", fetchError)
-            console.error("Error details:", {
-              message: fetchError?.message,
-              name: fetchError?.name,
-              stack: fetchError?.stack,
+            // Chỉ test promise, không await để tránh block
+            testTask.promise.catch((testError: any) => {
+              console.warn("Blob URL direct load failed, will try ArrayBuffer method:", testError)
             })
-            throw new Error(`Không thể load PDF từ blob URL: ${fetchError?.message || 'Unknown error'}`)
+          } catch (directError: any) {
+            console.warn("Direct blob URL failed, trying ArrayBuffer method:", directError)
+            
+            // Fallback: convert sang ArrayBuffer (chỉ khi cần thiết)
+            try {
+              const response = await fetch(pdfUrl, {
+                method: 'GET',
+                headers: {
+                  'Accept': 'application/pdf',
+                },
+              })
+              
+              if (!response.ok) {
+                throw new Error(`Không thể fetch blob URL: ${response.status} ${response.statusText}`)
+              }
+              
+              // Kiểm tra size trước khi allocate
+              const contentLength = response.headers.get('content-length')
+              if (contentLength) {
+                const sizeInMB = parseInt(contentLength) / (1024 * 1024)
+                if (sizeInMB > 100) {
+                  throw new Error(`PDF quá lớn (${sizeInMB.toFixed(2)}MB). Vui lòng sử dụng PDF nhỏ hơn.`)
+                }
+              }
+              
+              const arrayBuffer = await response.arrayBuffer()
+              
+              if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+                throw new Error("Blob URL trả về dữ liệu rỗng")
+              }
+              
+              // Kiểm tra size sau khi load
+              const sizeInMB = arrayBuffer.byteLength / (1024 * 1024)
+              if (sizeInMB > 100) {
+                throw new Error(`PDF quá lớn (${sizeInMB.toFixed(2)}MB). Vui lòng sử dụng PDF nhỏ hơn.`)
+              }
+              
+              pdfSource = { data: new Uint8Array(arrayBuffer) }
+              console.log("✅ PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes (", sizeInMB.toFixed(2), "MB)")
+            } catch (fetchError: any) {
+              console.error("❌ Error fetching blob URL:", fetchError)
+              throw new Error(`Không thể load PDF từ blob URL: ${fetchError?.message || 'Unknown error'}`)
+            }
           }
         } else {
           pdfSource = { url: pdfUrl }
@@ -346,14 +377,36 @@ export function PDFViewerWithHighlight({
         await page.render(renderContext).promise
 
         // Extract text từ page để tìm UC_id
-        const textContent = await page.getTextContent()
+        // Thử nhiều cách extract text
+        let textContent: any
+        try {
+          textContent = await page.getTextContent({
+            normalizeWhitespace: true, // Normalize whitespace
+            disableCombineTextItems: false, // Combine text items
+          })
+        } catch (textError) {
+          console.warn(`Error extracting text from page ${pageNum}:`, textError)
+          // Fallback: thử không có options
+          textContent = await page.getTextContent()
+        }
+
+        console.log(`Page ${pageNum} - Text items count:`, textContent.items.length)
+        
+        // Log một số text items để debug
+        if (textContent.items.length > 0) {
+          const sampleTexts = textContent.items.slice(0, 10).map((item: any) => item.str).join(" | ")
+          console.log(`Page ${pageNum} - Sample texts:`, sampleTexts)
+        }
+
         const linesMap = new Map<number, any[]>()
 
-        // Group text items by line
+        // Group text items by line với tolerance cho y position
+        const Y_TOLERANCE = 5 // Cho phép sai số 5px cho cùng một dòng
+        
         textContent.items.forEach((item: any) => {
           if (item.str && item.str.trim()) {
             const tx = pdfjs.Util.transform(viewport.transform, item.transform)
-            const y = Math.round(tx[5])
+            const y = Math.round(tx[5] / Y_TOLERANCE) * Y_TOLERANCE // Round để group các items gần nhau
             
             if (!linesMap.has(y)) {
               linesMap.set(y, [])
@@ -368,21 +421,52 @@ export function PDFViewerWithHighlight({
             })
           }
         })
+        
+        console.log(`Page ${pageNum} - Lines found:`, linesMap.size)
 
         // Tìm UC_id trong từng line
         linesMap.forEach((lineItems, yKey) => {
           lineItems.sort((a, b) => a.x - b.x)
+          // Thử nhiều cách join: với space, không space, với hyphen
           const lineText = lineItems.map((item) => item.str).join(" ")
+          const lineTextNoSpace = lineItems.map((item) => item.str).join("")
+          const lineTextWithHyphen = lineItems.map((item) => item.str).join("-")
           
-          // Tìm UC_id trong line text
+          // Tìm UC_id trong line text với nhiều cách
           for (const ucId of highlightTexts) {
             if (!ucId || !ucId.trim()) continue
             
             const ucIdLower = ucId.toLowerCase().trim()
+            const ucIdNoSpace = ucIdLower.replace(/\s+/g, "")
             const lineTextLower = lineText.toLowerCase()
+            const lineTextNoSpaceLower = lineTextNoSpace.toLowerCase()
             
-            const index = lineTextLower.indexOf(ucIdLower)
+            // Tìm với nhiều cách: có space, không space, có hyphen
+            let index = lineTextLower.indexOf(ucIdLower)
+            let searchText = lineText
+            let searchTextLower = lineTextLower
+            
+            if (index === -1) {
+              // Thử không có space
+              index = lineTextNoSpaceLower.indexOf(ucIdNoSpace)
+              if (index !== -1) {
+                searchText = lineTextNoSpace
+                searchTextLower = lineTextNoSpaceLower
+              }
+            }
+            
+            if (index === -1) {
+              // Thử với hyphen
+              const lineTextHyphenLower = lineTextWithHyphen.toLowerCase()
+              index = lineTextHyphenLower.indexOf(ucIdLower)
+              if (index !== -1) {
+                searchText = lineTextWithHyphen
+                searchTextLower = lineTextHyphenLower
+              }
+            }
+            
             if (index !== -1) {
+              console.log(`✅ Found UC_id "${ucId}" in page ${pageNum}, line: "${lineText.substring(0, 50)}..."`)
               // Tính toán vị trí highlight
               let currentTextPos = 0
               let highlightStartX = lineItems[0].x
