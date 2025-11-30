@@ -195,6 +195,7 @@ interface PDFViewerWithHighlightProps {
   onHighlightClick?: (text: string) => void // Callback khi click vào highlight
   selectedText?: string | null // UC_id đang được chọn
   selectedTextMatchIndex?: number // Index của match hiện tại cho selectedText
+  shouldScroll?: boolean // Flag để chỉ cho phép scroll khi true
 }
 
 interface TextItem {
@@ -225,6 +226,7 @@ export function PDFViewerWithHighlight({
   onHighlightClick,
   selectedText,
   selectedTextMatchIndex = 0,
+  shouldScroll = true, // Mặc định cho phép scroll để tương thích ngược
 }: PDFViewerWithHighlightProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
@@ -233,6 +235,7 @@ export function PDFViewerWithHighlight({
   const [totalPages, setTotalPages] = useState(0)
   const canvasRefs = useRef<Map<number, HTMLCanvasElement>>(new Map())
   const [allMatches, setAllMatches] = useState<Record<string, MatchLocation[]>>({}) // Lưu tất cả matches cho mỗi UC_id
+  const [pagesRendered, setPagesRendered] = useState(false) // Track việc render pages
 
   // Load PDF
   useEffect(() => {
@@ -369,6 +372,9 @@ export function PDFViewerWithHighlight({
       if (containerRef.current) {
         containerRef.current.innerHTML = ""
       }
+      
+      // Reset pagesRendered flag
+      setPagesRendered(false)
 
       const matchesByUcId: Record<string, MatchLocation[]> = {}
       
@@ -442,6 +448,9 @@ export function PDFViewerWithHighlight({
         // Lưu tất cả matches
         setAllMatches(matchesByUcId)
         console.log("Matches from bboxes:", matchesByUcId)
+        
+        // Đánh dấu pages đã render xong
+        setPagesRendered(true)
         
         // Vẽ highlights
         drawHighlights(matchesByUcId)
@@ -637,6 +646,9 @@ export function PDFViewerWithHighlight({
       setAllMatches(matchesByUcId)
       console.log("✅ Matches found:", matchesByUcId)
       
+      // Đánh dấu pages đã render xong
+      setPagesRendered(true)
+      
       // Vẽ highlights
       drawHighlights(matchesByUcId)
     }
@@ -799,7 +811,16 @@ export function PDFViewerWithHighlight({
   }, [selectedText, allMatches, totalPages])
 
   // Scroll to match khi selectedText hoặc selectedTextMatchIndex thay đổi
+  // CHỈ scroll khi shouldScroll = true và pages đã render xong
   useEffect(() => {
+    if (!shouldScroll) {
+      return // Không scroll nếu shouldScroll = false
+    }
+    
+    if (!pagesRendered) {
+      return // Không scroll nếu pages chưa render xong
+    }
+    
     if (selectedText && allMatches[selectedText] && allMatches[selectedText].length > 0) {
       // Sử dụng selectedTextMatchIndex từ props, nếu không có thì dùng 0
       const index = selectedTextMatchIndex !== undefined ? selectedTextMatchIndex : 0
@@ -807,34 +828,46 @@ export function PDFViewerWithHighlight({
       const match = allMatches[selectedText][actualIndex]
       
       if (match) {
-        const pageContainer = document.getElementById(`pdf-page-container-${match.pageNum}`)
-        if (pageContainer) {
-          // Scroll đến page container
-          pageContainer.scrollIntoView({ behavior: "smooth", block: "center" })
-          
-          // Highlight match hiện tại (làm nổi bật hơn)
-          setTimeout(() => {
-            const overlay = document.getElementById(`pdf-overlay-${match.pageNum}`)
-            if (overlay) {
-              const highlights = overlay.querySelectorAll('div[data-uc-id]')
-              highlights.forEach((hl: any) => {
-                if (hl.getAttribute('data-uc-id') === selectedText && 
-                    hl.getAttribute('data-match-index') === String(actualIndex)) {
-                  // blue ring cho selected
-                  // hl.classList.add('ring-4', 'ring-blue-500')
-                  hl.style.zIndex = '10'
-                } else {
-                  // blue ring
-                  // hl.classList.remove('ring-4', 'ring-blue-500')
-                  hl.style.zIndex = '1'
-                }
-              })
-            }
-          }, 300)
-        }
+        // Đợi một chút để đảm bảo DOM đã update
+        setTimeout(() => {
+          const pageContainer = document.getElementById(`pdf-page-container-${match.pageNum}`)
+          if (pageContainer) {
+            // Scroll đến page container
+            pageContainer.scrollIntoView({ behavior: "smooth", block: "center" })
+            
+            // Highlight match hiện tại (làm nổi bật hơn)
+            setTimeout(() => {
+              const overlay = document.getElementById(`pdf-overlay-${match.pageNum}`)
+              if (overlay) {
+                const highlights = overlay.querySelectorAll('div[data-uc-id]')
+                highlights.forEach((hl: any) => {
+                  if (hl.getAttribute('data-uc-id') === selectedText && 
+                      hl.getAttribute('data-match-index') === String(actualIndex)) {
+                    // blue ring cho selected
+                    // hl.classList.add('ring-4', 'ring-blue-500')
+                    hl.style.zIndex = '10'
+                  } else {
+                    // blue ring
+                    // hl.classList.remove('ring-4', 'ring-blue-500')
+                    hl.style.zIndex = '1'
+                  }
+                })
+              }
+            }, 300)
+          } else {
+            // Nếu page chưa render, thử lại sau
+            console.warn(`Page container ${match.pageNum} not found, retrying...`)
+            setTimeout(() => {
+              const retryContainer = document.getElementById(`pdf-page-container-${match.pageNum}`)
+              if (retryContainer) {
+                retryContainer.scrollIntoView({ behavior: "smooth", block: "center" })
+              }
+            }, 500)
+          }
+        }, 100) // Đợi 100ms để DOM update
       }
     }
-  }, [selectedText, selectedTextMatchIndex, allMatches])
+  }, [selectedText, selectedTextMatchIndex, allMatches, shouldScroll, pagesRendered])
 
   if (loading) {
     return (

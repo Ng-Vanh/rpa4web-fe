@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -106,6 +106,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const [selectedUcId, setSelectedUcId] = useState<string | null>(null)
   const [pdfLoading, setPdfLoading] = useState(false)
   const [ucIdMatchIndex, setUcIdMatchIndex] = useState<Record<string, number>>({}) // Track match index cho mỗi UC_id
+  const [shouldScrollToPdf, setShouldScrollToPdf] = useState(false) // Flag để chỉ cho phép scroll khi click vào UC_id
 
   // Đồng bộ state khi props data thay đổi
   useEffect(() => {
@@ -176,7 +177,23 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     }
   }
 
-  const handleUcIdClick = (ucId: string) => {
+  const handleUcIdClick = (ucId: string, event?: React.MouseEvent) => {
+    // Chỉ cho phép click trực tiếp vào UC_id span
+    if (event) {
+      event.stopPropagation()
+      // Kiểm tra xem click có phải từ UC_id span không
+      const target = event.target as HTMLElement
+      const ucIdElement = target.closest('[data-uc-id-click]')
+      // Nếu không tìm thấy UC_id element, không cho phép
+      if (!ucIdElement) {
+        return
+      }
+    } else {
+      // Nếu không có event, có nghĩa là không phải click trực tiếp vào UC_id
+      // Không cho phép scroll
+      return
+    }
+    
     // Cycle qua các matches của UC_id này
     const currentIndex = ucIdMatchIndex[ucId] || 0
     
@@ -187,13 +204,34 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       [ucId]: currentIndex + 1
     }))
     
+    // Đánh dấu rằng đây là click hợp lệ vào UC_id, cho phép scroll
+    // Set shouldScroll trước khi set selectedUcId để đảm bảo useEffect nhận được flag
+    setShouldScrollToPdf(true)
     setSelectedUcId(ucId)
+    
+    // Reset flag sau khi scroll xong (tăng timeout để đảm bảo scroll hoàn tất)
+    setTimeout(() => {
+      setShouldScrollToPdf(false)
+    }, 1000) // Tăng từ 100ms lên 1000ms để đảm bảo scroll xong
   }
 
-  const handleScenarioClick = (scenarioId: number) => {
+  const handleScenarioClick = (scenarioId: number, fromQuickLink: boolean = false) => {
     const scenario = scenarios.find(s => s.id === scenarioId)
     if (scenario && scenario.UC_id) {
-      handleUcIdClick(scenario.UC_id)
+      if (fromQuickLink) {
+        // Chỉ cho phép scroll khi click từ quick links
+        const currentIndex = ucIdMatchIndex[scenario.UC_id] || 0
+        setUcIdMatchIndex(prev => ({
+          ...prev,
+          [scenario.UC_id]: currentIndex + 1
+        }))
+        // Set shouldScroll trước khi set selectedUcId để đảm bảo useEffect nhận được flag
+        setShouldScrollToPdf(true)
+        setSelectedUcId(scenario.UC_id)
+        setTimeout(() => {
+          setShouldScrollToPdf(false)
+        }, 1000) // Tăng từ 100ms lên 1000ms để đảm bảo scroll xong
+      }
       // Scroll đến scenario trong danh sách
       const element = document.getElementById(`scenario-${scenarioId}`)
       if (element) {
@@ -214,20 +252,6 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     }
   }
 
-  // Lấy danh sách tất cả UC_id để highlight (deprecated - dùng getBboxes thay thế)
-  const getAllUcIds = () => {
-    return Array.from(new Set(scenarios.map(s => s.UC_id).filter(Boolean)))
-  }
-
-  // Lấy danh sách UC_id với bbox để highlight
-  const getBboxes = () => {
-    return scenarios
-      .filter(s => s.UC_id && s.caption_bbox)
-      .map(s => ({
-        ucId: s.UC_id,
-        bbox: s.caption_bbox!,
-      }))
-  }
 
   // Cleanup blob URL khi component unmount hoặc pdfUrl thay đổi
   useEffect(() => {
@@ -1433,6 +1457,23 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
 
   const scenarios = scenariosState
 
+  // Lấy danh sách tất cả UC_id để highlight (deprecated - dùng bboxes thay thế)
+  // Sử dụng useMemo để tránh tạo array mới mỗi lần render, chỉ tạo lại khi scenarios thay đổi
+  const allUcIds = useMemo(() => {
+    return Array.from(new Set(scenarios.map(s => s.UC_id).filter(Boolean)))
+  }, [scenarios])
+
+  // Lấy danh sách UC_id với bbox để highlight
+  // Sử dụng useMemo để tránh tạo array mới mỗi lần render, chỉ tạo lại khi scenarios thay đổi
+  const bboxes = useMemo(() => {
+    return scenarios
+      .filter(s => s.UC_id && s.caption_bbox)
+      .map(s => ({
+        ucId: s.UC_id,
+        bbox: s.caption_bbox!,
+      }))
+  }, [scenarios])
+
   return (
     <div className="h-screen bg-background flex flex-col overflow-hidden">
       <nav className="border-b bg-card flex-shrink-0">
@@ -1549,14 +1590,16 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <h3 className="text-lg font-semibold text-gray-900">
                             <span className="font-mono text-blue-600">{index + 1}.</span> {scenario["Title"]} 
                             <span 
+                              data-uc-id-click="true"
                               className={`text-sm ml-2 cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
                                 selectedUcId === scenario.UC_id 
                                   ? 'text-blue-600 font-bold bg-blue-50 ring-2 ring-blue-300' 
                                   : 'text-gray-500 hover:bg-gray-100'
                               }`}
-                              onClick={() => {
+                              onClick={(e) => {
+                                e.stopPropagation()
                                 if (scenario.UC_id) {
-                                  handleUcIdClick(scenario.UC_id)
+                                  handleUcIdClick(scenario.UC_id, e)
                                 }
                               }}
                               title="Click để scroll đến phần khớp trong PDF (click nhiều lần để xem các match khác)"
@@ -1573,7 +1616,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleSave(scenario.id!)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleSave(scenario.id!)
+                            }}
                             disabled={isSaving}
                             className="text-green-600 hover:text-green-700"
                           >
@@ -1583,7 +1629,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleCancelEdit(scenario.id!)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleCancelEdit(scenario.id!)
+                            }}
                             className="text-gray-500 hover:text-gray-700"
                           >
                             <X className="h-4 w-4 mr-1" />
@@ -1595,7 +1644,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleEdit(scenario.id!)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleEdit(scenario.id!)
+                            }}
                             className="text-blue-600 hover:text-blue-700"
                           >
                             <Edit3 className="h-4 w-4 mr-1" />
@@ -1604,7 +1656,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDelete(scenario.id!)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleDelete(scenario.id!)
+                            }}
                             disabled={isDeleting === String(scenario.id)}
                             className="text-red-600 hover:text-red-700"
                           >
@@ -1614,7 +1669,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleGenerateTestCases(scenario.id!)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleGenerateTestCases(scenario.id!)
+                            }}
                             disabled={isGeneratingTC === String(scenario.id)}
                             className="text-gray-500 hover:text-gray-700"
                           >
@@ -1667,7 +1725,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  onClick={() => handleRemoveStep(scenario.id!, stepIndex)}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleRemoveStep(scenario.id!, stepIndex)
+                                  }}
                                   className="text-red-500 hover:text-red-700"
                                 >
                                   <X className="h-4 w-4" />
@@ -1677,7 +1738,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleAddStep(scenario.id!)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleAddStep(scenario.id!)
+                              }}
                               className="text-blue-600 hover:text-blue-700"
                             >
                               + Add Step
@@ -1773,7 +1837,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleSaveEditGeneratedTC(scenario.id!, tcIndex)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleSaveEditGeneratedTC(scenario.id!, tcIndex)
+                                            }}
                                             className="text-green-600 hover:text-green-700"
                                           >
                                             <Save className="h-3 w-3 mr-1" />
@@ -1782,7 +1849,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleCancelEditGeneratedTC(editKey)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleCancelEditGeneratedTC(editKey)
+                                            }}
                                             className="text-gray-500 hover:text-gray-700"
                                           >
                                             <X className="h-3 w-3 mr-1" />
@@ -1794,7 +1864,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleSaveGeneratedTestCaseToDB(scenario.id!, tcIndex)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleSaveGeneratedTestCaseToDB(scenario.id!, tcIndex)
+                                            }}
                                             disabled={isSavingGeneratedTC === `${scenario.id}-${tcIndex}`}
                                             className="bg-green-600 hover:bg-green-700 text-white"
                                           >
@@ -1813,7 +1886,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleDeleteGeneratedTestCase(scenario.id!, tcIndex)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleDeleteGeneratedTestCase(scenario.id!, tcIndex)
+                                            }}
                                             className="text-red-600 hover:text-red-700"
                                           >
                                             <Trash2 className="h-3 w-3 mr-1" />
@@ -1824,7 +1900,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => toggleGeneratedTestCaseExpansion(`${scenario.id}-generated-${tcIndex}`)}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          toggleGeneratedTestCaseExpansion(`${scenario.id}-generated-${tcIndex}`)
+                                        }}
                                         className="text-gray-500 hover:text-gray-700"
                                       >
                                         {expandedTestCases.has(`${scenario.id}-generated-${tcIndex}`) ? 'Collapse' : 'Expand'}
@@ -1987,7 +2066,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleSaveEditDatabaseTC(testCase.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleSaveEditDatabaseTC(testCase.id)
+                                            }}
                                             className="text-green-600 hover:text-green-700"
                                           >
                                             <Save className="h-3 w-3 mr-1" />
@@ -1996,7 +2078,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleCancelEditDatabaseTC(testCase.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleCancelEditDatabaseTC(testCase.id)
+                                            }}
                                             className="text-gray-500 hover:text-gray-700"
                                           >
                                             <X className="h-3 w-3 mr-1" />
@@ -2008,7 +2093,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleEditDatabaseTestCase(testCase.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleEditDatabaseTestCase(testCase.id)
+                                            }}
                                             className="text-blue-600 hover:text-blue-700"
                                           >
                                             <Edit3 className="h-3 w-3 mr-1" />
@@ -2017,7 +2105,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="ghost"
                                             size="sm"
-                                            onClick={() => handleDeleteDatabaseTestCase(testCase.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleDeleteDatabaseTestCase(testCase.id)
+                                            }}
                                             className="text-red-600 hover:text-red-700"
                                           >
                                             <Trash2 className="h-3 w-3 mr-1" />
@@ -2028,7 +2119,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                       <Button
                                         variant="ghost"
                                         size="sm"
-                                        onClick={() => toggleTestCaseExpansion(`${scenario.id}-${testCase.id}`)}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          toggleTestCaseExpansion(`${scenario.id}-${testCase.id}`)
+                                        }}
                                         className="text-gray-500 hover:text-gray-700"
                                       >
                                         {expandedTestCases.has(`${scenario.id}-${testCase.id}`) ? 'Collapse' : 'Expand'}
@@ -2081,7 +2175,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                                       <Button
                                                         variant="ghost"
                                                         size="sm"
-                                                        onClick={() => handleRemoveDatabaseStep(testCase.id, step.stepKey)}
+                                                        onClick={(e) => {
+                                                          e.stopPropagation()
+                                                          handleRemoveDatabaseStep(testCase.id, step.stepKey)
+                                                        }}
                                                         className="text-red-500 hover:text-red-700 mt-1"
                                                       >
                                                         <X className="h-4 w-4" />
@@ -2138,7 +2235,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                                           <Button
                                             variant="outline"
                                             size="sm"
-                                            onClick={() => handleAddDatabaseStep(testCase.id)}
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              handleAddDatabaseStep(testCase.id)
+                                            }}
                                             className="text-blue-600 hover:text-blue-700"
                                           >
                                             + Add Step
@@ -2166,7 +2266,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => loadDatabaseTestCases(scenario.id!)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              loadDatabaseTestCases(scenario.id!)
+                            }}
                             disabled={isLoadingDatabaseTC === String(scenario.id)}
                             className="text-blue-600 hover:text-blue-700"
                           >
@@ -2262,10 +2365,11 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                   {Array.from(new Set(scenarios.map(s => s.UC_id))).map((ucId) => (
                     <button
                       key={ucId}
-                      onClick={() => {
+                      onClick={(e) => {
+                        e.stopPropagation()
                         const scenario = scenarios.find(s => s.UC_id === ucId)
                         if (scenario && scenario.id) {
-                          handleScenarioClick(scenario.id)
+                          handleScenarioClick(scenario.id, true)
                         }
                       }}
                       className={`px-2 py-1 text-xs rounded transition-colors ${
@@ -2293,11 +2397,12 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
               ) : pdfUrl ? (
                 <PDFViewerWithHighlight
                   pdfUrl={pdfUrl}
-                  bboxes={getBboxes()}
-                  highlightTexts={getAllUcIds()} // Fallback nếu không có bbox
+                  bboxes={bboxes}
+                  highlightTexts={allUcIds} // Fallback nếu không có bbox
                   onHighlightClick={handleHighlightClick}
                   selectedText={selectedUcId}
                   selectedTextMatchIndex={selectedUcId ? (ucIdMatchIndex[selectedUcId] || 0) : 0}
+                  shouldScroll={shouldScrollToPdf}
                 />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
