@@ -114,7 +114,7 @@ const loadPdfJs = async () => {
                 // Lưu vào window để dùng lại
                 (window as any).pdfjsLib = pdfjsLib
                 
-                console.log("✅ PDF.js loaded successfully from CDN:", cdnUrls[urlIndex])
+                console.log(" PDF.js loaded successfully from CDN:", cdnUrls[urlIndex])
                 console.log("PDF.js functions available:", {
                   hasGetDocument: typeof pdfjsLib.getDocument === "function",
                   hasUtil: !!pdfjsLib.Util,
@@ -175,9 +175,23 @@ const loadPdfJs = async () => {
   return pdfjsLoading
 }
 
+interface BBox {
+  x0: number
+  x1: number
+  top: number
+  bottom: number
+  page: number
+}
+
+interface UCIdWithBBox {
+  ucId: string
+  bbox: BBox
+}
+
 interface PDFViewerWithHighlightProps {
   pdfUrl: string | null
-  highlightTexts: string[] // Danh sách UC_id cần highlight
+  highlightTexts?: string[] // Danh sách UC_id cần highlight (deprecated - dùng bboxes thay thế)
+  bboxes?: UCIdWithBBox[] // Danh sách UC_id với bbox để highlight
   onHighlightClick?: (text: string) => void // Callback khi click vào highlight
   selectedText?: string | null // UC_id đang được chọn
   selectedTextMatchIndex?: number // Index của match hiện tại cho selectedText
@@ -201,11 +215,13 @@ interface MatchLocation {
   height: number
   text: string
   ucId: string
+  pdfplumberBbox?: BBox // Lưu bbox gốc từ pdfplumber để convert
 }
 
 export function PDFViewerWithHighlight({
   pdfUrl,
-  highlightTexts,
+  highlightTexts = [],
+  bboxes = [],
   onHighlightClick,
   selectedText,
   selectedTextMatchIndex = 0,
@@ -251,7 +267,7 @@ export function PDFViewerWithHighlight({
           try {
             // Thử dùng URL trực tiếp trước (nhanh hơn, ít tốn memory hơn)
             pdfSource = { url: pdfUrl }
-            console.log("✅ Using blob URL directly for PDF.js")
+            console.log(" Using blob URL directly for PDF.js")
             
             // Test xem URL có hoạt động không bằng cách thử load
             const testTask = pdfjs.getDocument({
@@ -303,7 +319,7 @@ export function PDFViewerWithHighlight({
               }
               
               pdfSource = { data: new Uint8Array(arrayBuffer) }
-              console.log("✅ PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes (", sizeInMB.toFixed(2), "MB)")
+              console.log(" PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes (", sizeInMB.toFixed(2), "MB)")
             } catch (fetchError: any) {
               console.error("❌ Error fetching blob URL:", fetchError)
               throw new Error(`Không thể load PDF từ blob URL: ${fetchError?.message || 'Unknown error'}`)
@@ -321,7 +337,7 @@ export function PDFViewerWithHighlight({
         })
 
         const pdf = await loadingTask.promise
-        console.log("✅ PDF loaded successfully:", {
+        console.log(" PDF loaded successfully:", {
           numPages: pdf.numPages,
           pdfUrl: pdfUrl
         })
@@ -338,9 +354,15 @@ export function PDFViewerWithHighlight({
     loadPdf()
   }, [pdfUrl])
 
-  // Render pages và extract text để highlight
+  // Render pages và highlight dựa trên bbox hoặc text search
   useEffect(() => {
-    if (!pdfDoc || !containerRef.current || !highlightTexts || highlightTexts.length === 0) return
+    if (!pdfDoc || !containerRef.current) return
+    
+    // Ưu tiên dùng bboxes, nếu không có thì mới dùng highlightTexts (text search)
+    const useBboxes = bboxes && bboxes.length > 0
+    const useTextSearch = !useBboxes && highlightTexts && highlightTexts.length > 0
+    
+    if (!useBboxes && !useTextSearch) return
 
     const renderPages = async () => {
       // Clear container trước khi render
@@ -349,6 +371,84 @@ export function PDFViewerWithHighlight({
       }
 
       const matchesByUcId: Record<string, MatchLocation[]> = {}
+      
+      // Nếu có bboxes, dùng bboxes trực tiếp
+      if (useBboxes) {
+        console.log("✅ Using bboxes for highlighting:", bboxes)
+        
+        bboxes.forEach(({ ucId, bbox }) => {
+          if (!matchesByUcId[ucId]) {
+            matchesByUcId[ucId] = []
+          }
+          
+          // pdfplumber bbox: origin ở bottom-left
+          // Lưu bbox coordinates từ pdfplumber (sẽ convert sang viewport sau)
+          matchesByUcId[ucId].push({
+            pageNum: bbox.page,
+            x: bbox.x0, // x0 từ pdfplumber
+            y: bbox.top, // top từ pdfplumber (trong hệ bottom-left)
+            width: bbox.x1 - bbox.x0,
+            height: bbox.bottom - bbox.top,
+            text: ucId,
+            ucId: ucId,
+            // Lưu thêm bbox gốc để convert sau
+            pdfplumberBbox: bbox,
+          })
+        })
+        
+        // Render pages với highlights từ bboxes
+        for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+          const page = await pdfDoc.getPage(pageNum)
+          const viewport = page.getViewport({ scale: 1.5 })
+          
+          // Tạo canvas cho mỗi trang
+          const canvas = document.createElement("canvas")
+          const context = canvas.getContext("2d")
+          if (!context) continue
+
+          canvas.height = viewport.height
+          canvas.width = viewport.width
+          canvas.className = "mb-4 shadow-lg mx-auto"
+          canvas.id = `pdf-page-${pageNum}`
+
+          // Render PDF page vào canvas
+          const renderContext = {
+            canvasContext: context,
+            viewport: viewport,
+          }
+          await page.render(renderContext).promise
+
+          // Tạo page container với overlay cho highlights
+          const pageContainer = document.createElement("div")
+          pageContainer.className = "relative flex justify-center mb-4"
+          pageContainer.id = `pdf-page-container-${pageNum}`
+
+          const overlay = document.createElement("div")
+          overlay.className = "absolute top-0 left-0 pointer-events-none"
+          overlay.style.width = `${viewport.width}px`
+          overlay.style.height = `${viewport.height}px`
+          overlay.id = `pdf-overlay-${pageNum}`
+
+          pageContainer.appendChild(canvas)
+          pageContainer.appendChild(overlay)
+          
+          if (containerRef.current) {
+            containerRef.current.appendChild(pageContainer)
+          }
+
+          canvasRefs.current.set(pageNum, canvas)
+        }
+        
+        // Lưu tất cả matches
+        setAllMatches(matchesByUcId)
+        console.log("Matches from bboxes:", matchesByUcId)
+        
+        // Vẽ highlights
+        drawHighlights(matchesByUcId)
+        return // Không cần text search nữa
+      }
+      
+      // Fallback: Text search (code cũ)
       const pdfjs = await loadPdfJs()
       if (!pdfjs) {
         console.error("PDF.js not loaded")
@@ -466,7 +566,7 @@ export function PDFViewerWithHighlight({
             }
             
             if (index !== -1) {
-              console.log(`✅ Found UC_id "${ucId}" in page ${pageNum}, line: "${lineText.substring(0, 50)}..."`)
+              console.log(` Found UC_id "${ucId}" in page ${pageNum}, line: "${lineText.substring(0, 50)}..."`)
               // Tính toán vị trí highlight
               let currentTextPos = 0
               let highlightStartX = lineItems[0].x
@@ -542,10 +642,10 @@ export function PDFViewerWithHighlight({
     }
 
     renderPages()
-  }, [pdfDoc, totalPages, highlightTexts])
+  }, [pdfDoc, totalPages, highlightTexts, bboxes])
 
   // Draw highlights với màu cam
-  const drawHighlights = (matches: Record<string, MatchLocation[]>) => {
+  const drawHighlights = async (matches: Record<string, MatchLocation[]>) => {
     // Clear existing highlights
     for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
       const overlay = document.getElementById(`pdf-overlay-${pageNum}`)
@@ -555,23 +655,129 @@ export function PDFViewerWithHighlight({
     }
 
     // Vẽ highlights cho tất cả matches
-    Object.keys(matches).forEach((ucId) => {
-      matches[ucId].forEach((match, index) => {
+    for (const ucId of Object.keys(matches)) {
+      for (let index = 0; index < matches[ucId].length; index++) {
+        const match = matches[ucId][index]
         const overlay = document.getElementById(`pdf-overlay-${match.pageNum}`)
-        if (!overlay) return
+        if (!overlay) continue
 
+        // Lấy viewport của page để convert coordinates
+        const page = await pdfDoc.getPage(match.pageNum)
+        const viewport = page.getViewport({ scale: 1.5 })
+        
+        // Convert pdfplumber bbox sang viewport coordinates
+        // pdfplumber: origin ở bottom-left (0,0 ở góc dưới trái)
+        // PDF.js viewport: origin ở top-left (0,0 ở góc trên trái)
+        let viewportX: number
+        let viewportY: number
+        let viewportWidth: number
+        let viewportHeight: number
+        
+        if (match.pdfplumberBbox) {
+          // Có bbox từ pdfplumber, cần convert
+          const bbox = match.pdfplumberBbox
+          const pageRect = page.getViewport({ scale: 1.0 }) // Get page size at scale 1.0
+          const pageHeight = pageRect.height
+          
+          console.log(`Converting bbox for page ${match.pageNum}:`, {
+            pdfplumber: { x0: bbox.x0, x1: bbox.x1, top: bbox.top, bottom: bbox.bottom },
+            pageHeight,
+            viewportSize: { width: viewport.width, height: viewport.height },
+            pageRectSize: { width: pageRect.width, height: pageRect.height }
+          })
+          
+          // Convert từ pdfplumber (bottom-left) sang viewport (top-left)
+          // x: giữ nguyên, scale theo viewport
+          viewportX = bbox.x0 * (viewport.width / pageRect.width)
+          viewportWidth = (bbox.x1 - bbox.x0) * (viewport.width / pageRect.width)
+          
+          // y: flip (page_height - y)
+          // pdfplumber: top và bottom là khoảng cách từ bottom (bottom-left origin)
+          // viewport: cần khoảng cách từ top (top-left origin)
+          // 
+          // pdfplumber: top > bottom (top cao hơn bottom trong hệ bottom-left)
+          // viewport: cần top < bottom (top thấp hơn bottom trong hệ top-left)
+          //
+          // Công thức đúng:
+          // - viewport top = pageHeight - pdfplumber bottom (vì bottom gần bottom nhất)
+          // - viewport bottom = pageHeight - pdfplumber top (vì top xa bottom nhất)
+          //
+          // Scale factor
+          const scaleX = viewport.width / pageRect.width
+          const scaleY = viewport.height / pageHeight
+          
+          // X: giữ nguyên, chỉ scale
+          viewportX = bbox.x0 * scaleX
+          viewportWidth = (bbox.x1 - bbox.x0) * scaleX
+          
+          // Y: convert và scale
+          // Nếu highlight bị đảo (ở trên nhưng highlight ở dưới), có thể pdfplumber đã dùng top-left origin
+          // Thử không flip trước (nếu vẫn sai thì mới flip)
+          
+          // Cách 1: Không flip (nếu pdfplumber đã dùng top-left origin - thử cách này trước)
+          let viewportTopFromTop = bbox.top * scaleY
+          let viewportBottomFromTop = bbox.bottom * scaleY
+          
+          // Cách 2: Flip (nếu pdfplumber dùng bottom-left origin)
+          // Nếu cách 1 bị đảo, uncomment 2 dòng này:
+          // viewportTopFromTop = (pageHeight - bbox.bottom) * scaleY
+          // viewportBottomFromTop = (pageHeight - bbox.top) * scaleY
+          
+          viewportY = viewportTopFromTop
+          viewportHeight = viewportBottomFromTop - viewportTopFromTop
+          
+          // Debug: log để kiểm tra
+          console.log(`Y conversion:`, {
+            pdfplumber: { top: bbox.top, bottom: bbox.bottom },
+            pageHeight,
+            scaleY,
+            viewportTop: viewportTopFromTop.toFixed(2),
+            viewportBottom: viewportBottomFromTop.toFixed(2),
+            viewportHeight: viewportHeight.toFixed(2)
+          })
+          
+          console.log(`Converted coordinates:`, {
+            viewportX,
+            viewportY,
+            viewportWidth,
+            viewportHeight
+          })
+        } else {
+          // Fallback: dùng match coordinates trực tiếp (từ text search)
+          viewportX = match.x
+          const pdfY = match.y
+          viewportY = viewport.height - pdfY - match.height
+          viewportWidth = match.width
+          viewportHeight = match.height
+        }
+        
         const highlight = document.createElement("div")
         highlight.setAttribute('data-uc-id', ucId)
         highlight.setAttribute('data-match-index', String(index))
+        // highlight.className = `absolute cursor-pointer transition-all ${
+        //   selectedText === ucId
+        //     ? "bg-orange-400 opacity-90 ring-2 ring-blue-500"
+        //     : "bg-orange-300 opacity-70 hover:opacity-90"
+        // }`
         highlight.className = `absolute cursor-pointer transition-all ${
           selectedText === ucId
-            ? "bg-orange-400 opacity-90 ring-2 ring-blue-500"
-            : "bg-orange-300 opacity-70 hover:opacity-90"
+            // ? "ring-2 ring-blue-500"
+            ? ""
+            : ""
         }`
-        highlight.style.left = `${match.x}px`
-        highlight.style.top = `${match.y - match.height}px`
-        highlight.style.width = `${Math.max(match.width, 30)}px`
-        highlight.style.height = `${Math.max(match.height, 15)}px`
+        // Dùng inline style với rgba để màu trong suốt, vẫn nhìn thấy chữ
+        if (selectedText === ucId) {
+          // Màu cam nhạt cho selected (alpha ~0.3 = 30% opacity)
+          highlight.style.backgroundColor = "rgba(251, 146, 60, 0.3)" // orange-400 với alpha 0.3
+        } else {
+          // Màu cam nhạt hơn cho không selected (alpha ~0.25 = 25% opacity)
+          highlight.style.backgroundColor = "rgba(253, 186, 116, 0.25)" // orange-300 với alpha 0.25
+        }
+
+        highlight.style.left = `${viewportX}px`
+        highlight.style.top = `${viewportY}px`
+        highlight.style.width = `${Math.max(viewportWidth, 30)}px`
+        highlight.style.height = `${Math.max(viewportHeight, 15)}px`
         highlight.style.pointerEvents = "auto"
         highlight.title = `UC_id: ${ucId} (${index + 1}/${matches[ucId].length}) - Click để scroll đến scenario`
         highlight.onclick = () => {
@@ -581,8 +787,8 @@ export function PDFViewerWithHighlight({
         }
 
         overlay.appendChild(highlight)
-      })
-    })
+      }
+    }
   }
 
   // Re-draw highlights khi selectedText thay đổi
@@ -614,10 +820,12 @@ export function PDFViewerWithHighlight({
               highlights.forEach((hl: any) => {
                 if (hl.getAttribute('data-uc-id') === selectedText && 
                     hl.getAttribute('data-match-index') === String(actualIndex)) {
-                  hl.classList.add('ring-4', 'ring-blue-500')
+                  // blue ring cho selected
+                  // hl.classList.add('ring-4', 'ring-blue-500')
                   hl.style.zIndex = '10'
                 } else {
-                  hl.classList.remove('ring-4', 'ring-blue-500')
+                  // blue ring
+                  // hl.classList.remove('ring-4', 'ring-blue-500')
                   hl.style.zIndex = '1'
                 }
               })

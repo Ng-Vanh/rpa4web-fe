@@ -22,6 +22,13 @@ interface Scenario {
   "Expected Result": string
   s_id: string
   id?: number // ID từ database để update
+  caption_bbox?: {
+    x0: number
+    x1: number
+    top: number
+    bottom: number
+    page: number
+  }
 }
 
 interface GeneratedTestCase {
@@ -207,9 +214,19 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     }
   }
 
-  // Lấy danh sách tất cả UC_id để highlight
+  // Lấy danh sách tất cả UC_id để highlight (deprecated - dùng getBboxes thay thế)
   const getAllUcIds = () => {
     return Array.from(new Set(scenarios.map(s => s.UC_id).filter(Boolean)))
+  }
+
+  // Lấy danh sách UC_id với bbox để highlight
+  const getBboxes = () => {
+    return scenarios
+      .filter(s => s.UC_id && s.caption_bbox)
+      .map(s => ({
+        ucId: s.UC_id,
+        bbox: s.caption_bbox!,
+      }))
   }
 
   // Cleanup blob URL khi component unmount hoặc pdfUrl thay đổi
@@ -2276,7 +2293,8 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
               ) : pdfUrl ? (
                 <PDFViewerWithHighlight
                   pdfUrl={pdfUrl}
-                  highlightTexts={getAllUcIds()}
+                  bboxes={getBboxes()}
+                  highlightTexts={getAllUcIds()} // Fallback nếu không có bbox
                   onHighlightClick={handleHighlightClick}
                   selectedText={selectedUcId}
                   selectedTextMatchIndex={selectedUcId ? (ucIdMatchIndex[selectedUcId] || 0) : 0}
