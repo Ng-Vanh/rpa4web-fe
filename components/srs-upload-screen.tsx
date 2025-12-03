@@ -101,11 +101,42 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
       newSRS.id = newSRS.id ?? srsId
       
       // Gọi preview API để lấy PDF blob và tạo object URL
-      try {
-        const blob = await getSrsPreview(srsId)
-        const url = URL.createObjectURL(blob)
-        setPreviewUrl(url)
-      } catch (e) {
+      // try {
+      //   const blob = await getSrsPreview(srsId)
+      //   const url = URL.createObjectURL(blob)
+      //   setPreviewUrl(url)
+      // } catch (e) {
+      //   console.warn('Load preview failed:', e)
+      // }
+
+      // ducpreview
+      try {  // Đợi 2 giây để backend xử lý file lớn  
+        await new Promise(resolve => setTimeout(resolve, 2000))    
+      // Retry logic với max 3 lần  
+        let blob: Blob | null = null  
+        let lastError: any = null    
+        
+        for (let attempt = 1; attempt <= 3; attempt++) {    
+          try {      
+            blob = await getSrsPreview(srsId)      
+            break // Thành công, thoát loop    
+          } catch (e) {      
+            lastError = e      
+            console.warn(`Preview attempt ${attempt}/3 failed:`, e)   
+          
+            // Đợi thêm trước lần retry tiếp theo (2s, 4s, 8s)      
+            if (attempt < 3) {        
+              await new Promise(resolve => setTimeout(resolve, 2000 * attempt))      
+            }    
+          }  
+        }    
+        if (blob) {    
+          const url = URL.createObjectURL(blob)    
+          setPreviewUrl(url)  
+        } else {    
+          console.warn('Load preview failed after 3 attempts:', lastError)  
+        }
+      } catch (e) {  
         console.warn('Load preview failed:', e)
       }
 

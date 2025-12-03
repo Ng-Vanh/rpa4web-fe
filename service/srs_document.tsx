@@ -182,6 +182,7 @@ export const getSrsPreview = async (srsId: number, rangeHeader?: string) => {
     headers,
     responseType: 'blob', // nhận về blob (PDF)
     validateStatus: () => true,
+    timeout: 10000, // 10 seconds timeout
   });
 
   if (response.status === 200 || response.status === 206) {
