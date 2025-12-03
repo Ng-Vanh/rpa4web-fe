@@ -111,7 +111,7 @@ export function SRSUploadScreen({ onBack, onContinueToWorkspace }: SRSUploadScre
 
       // ducpreview
       try {  // Đợi 2 giây để backend xử lý file lớn  
-        await new Promise(resolve => setTimeout(resolve, 4000))    
+        await new Promise(resolve => setTimeout(resolve, 2000))    
       // Retry logic với max 3 lần  
         let blob: Blob | null = null  
         let lastError: any = null    
