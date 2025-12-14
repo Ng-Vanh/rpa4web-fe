@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ArrowLeft, Plus, Play, Settings, User, Globe, CheckCircle } from "lucide-react"
-import { TestCaseDetailScreen } from "@/components/test-case-detail-screen"
+import { TestCaseDetailScreen } from '@/features/test-case-detail/TestCaseDetailScreen'
 import { SimpleTestCaseModal } from "@/components/simple-test-case-modal"
 import { getListTestScenarios } from "@/service/testscenario"
 import { getAllTestCases, createTestCase } from "@/service/testcase"
