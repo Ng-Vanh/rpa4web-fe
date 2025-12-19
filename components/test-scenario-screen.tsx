@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ArrowLeft, Plus, Play, Settings, User, Globe, CheckCircle, X } from "lucide-react"
-import { TestCaseDetailScreen } from "@/components/test-case-detail-screen"
+import { TestCaseDetailScreen } from '@/features/test-case-detail/TestCaseDetailScreen'
+import { TestCaseDetailScreen as TestCaseDetailScreenV2 } from "@/components/test-case-detail-screen"
 import { SimpleTestCaseModal } from "@/components/simple-test-case-modal"
 import { getListTestScenarios, createTestScenario } from "@/service/testscenario"
 import { getAllTestCases, createTestCase } from "@/service/testcase"
@@ -52,7 +53,7 @@ interface TestCase {
 export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
   const [scenarios, setScenarios] = useState<TestScenario[]>([])
   const [selectedScenario, setSelectedScenario] = useState<TestScenario | null>(null)
-  const [currentView, setCurrentView] = useState<"scenarios" | "testcase" | "create-testcase">("scenarios")
+  const [currentView, setCurrentView] = useState<"scenarios" | "testcase" | "testcase-run" | "create-testcase">("scenarios")
   const [selectedTestCase, setSelectedTestCase] = useState<any>(null)
   const [testCases, setTestCases] = useState<TestCase[]>([])
   const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false)
@@ -222,6 +223,12 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
     setCurrentView("testcase")
   }
 
+  const handleRunAllSteps = (testCase: any, e: React.MouseEvent) => {
+    e.stopPropagation() // Ngăn chặn sự kiện click của row
+    setSelectedTestCase(testCase)
+    setCurrentView("testcase-run")
+  }
+
   const handleBackToScenarios = () => {
     setCurrentView("scenarios")
     setSelectedTestCase(null)
@@ -255,6 +262,10 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
   }
 
   if (currentView === "testcase" && selectedTestCase) {
+    return <TestCaseDetailScreenV2 onBack={handleBackToScenarios} testCase={selectedTestCase} initialView="execution" />
+  }
+
+  if (currentView === "testcase-run" && selectedTestCase) {
     return <TestCaseDetailScreen onBack={handleBackToScenarios} testCase={selectedTestCase} initialView="execution" />
   }
 
@@ -389,6 +400,7 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                     <TableHead>Updated</TableHead>
                     <TableHead>Last Run</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -433,6 +445,18 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                           <CheckCircle className="h-4 w-4 text-green-600" />
                           <CheckCircle className="h-4 w-4 text-green-600" />
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={(e) => handleRunAllSteps(testCase, e)}
+                          className="whitespace-nowrap"
+                        >
+                          <Play className="h-4 w-4 mr-2" />
+                          Run All Steps
+                        </Button>
+
                       </TableCell>
                     </TableRow>
                   ))}
