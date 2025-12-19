@@ -53,3 +53,21 @@ export interface ApiResponse {
   fullOutput?: string
   exitCode?: number
 }
+
+
+export interface StepProgress {
+  step: number
+  status: 'pending' | 'running' | 'success' | 'error'
+  message?: string
+  duration?: number
+  timestamp?: number
+}
+
+export interface RunProgress {
+  currentStep: number
+  totalSteps: number
+  steps: StepProgress[]
+  isRunning: boolean
+  startTime?: number
+  endTime?: number
+}

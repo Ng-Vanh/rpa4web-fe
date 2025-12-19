@@ -1,9 +1,10 @@
-// hooks/useTestCaseDetail.ts - Custom hook chứa logic
+// hooks/useTestCaseDetail.ts - FIXED: Apply same pattern for both DOM and Image
 
 import { useState, useRef, useEffect } from "react"
-import { UploadedImage, TestCase } from "../types"
+import { UploadedImage, TestCase, StepProgress, RunProgress } from "../types"
 import { apiService } from "../api"
-import { getScriptContentFromEditor } from "../utils"
+import { streamingApiService } from "../streamingApi"
+import { getScriptContentFromEditor, parseScript } from "../utils"
 
 export const useTestCaseDetail = (testCase?: TestCase) => {
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([])
@@ -20,12 +21,29 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
   const [generatedScriptContent, setGeneratedScriptContent] = useState("")
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null)
   const [editorContent, setEditorContent] = useState("")
-  
-  // ⭐ Track loại script gần nhất: "dom" | "image" | null
   const [lastRunType, setLastRunType] = useState<"dom" | "image" | null>(null)
+  
+  const [runProgress, setRunProgress] = useState<RunProgress>({
+    currentStep: 0,
+    totalSteps: 0,
+    steps: [],
+    isRunning: false
+  })
   
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editorRef = useRef<HTMLDivElement>(null)
+  const [contentWhenRunStarted, setContentWhenRunStarted] = useState("")
+  
+  // ✅ CRITICAL: Prevent duplicate onComplete calls
+  const completionHandledRef = useRef(false)
+  
+  // ✅ Store latest progress in ref for immediate access
+  const latestProgressRef = useRef<RunProgress>({
+    currentStep: 0,
+    totalSteps: 0,
+    steps: [],
+    isRunning: false
+  })
 
   useEffect(() => {
     if (isImageLibraryOpen) {
@@ -38,6 +56,23 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
       loadTestCaseStep()
     }
   }, [testCase?.id])
+
+  useEffect(() => {
+    if (!runProgress.isRunning && 
+        runProgress.totalSteps > 0 && 
+        contentWhenRunStarted && 
+        editorContent !== contentWhenRunStarted) {
+      
+      console.log("Content changed after run - Resetting progress")
+      setRunProgress({
+        currentStep: 0,
+        totalSteps: 0,
+        steps: [],
+        isRunning: false
+      })
+      setContentWhenRunStarted("")
+    }
+  }, [editorContent, runProgress.isRunning, runProgress.totalSteps, contentWhenRunStarted])
 
   const loadTestCaseStep = async () => {
     if (!testCase?.id) return
@@ -135,63 +170,391 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
 
   const handleRunDOM = async () => {
     const script = getScriptContentFromEditor(editorRef.current)
+    const parsedScript = parseScript(script)
+    const totalSteps = parsedScript.filter(l => 
+      l.type === 'image' || (l.type === 'text' && l.content.trim())
+    ).length
     
     if (!script.trim()) {
       alert("Vui lòng nhập script trước khi chạy!")
       return
     }
 
+    console.log(`Starting DOM execution with ${totalSteps} steps`)
+    
+    // ✅ RESET completion flag
+    completionHandledRef.current = false
+
+    setLastRunType("dom")
+    setContentWhenRunStarted(editorContent)
+
+    const initialSteps: StepProgress[] = Array(totalSteps).fill(null).map((_, i) => ({
+      step: i + 1,
+      status: 'pending' as const,
+      message: '',
+      timestamp: Date.now()
+    }))
+
+    const initialProgress = {
+      currentStep: 0,
+      totalSteps,
+      steps: initialSteps,
+      isRunning: true,
+      startTime: Date.now()
+    }
+
+    setRunProgress(initialProgress)
+    latestProgressRef.current = initialProgress // ✅ Sync ref
+
     setIsRunning(true)
+    
     try {
-      const data = await apiService.runScriptDOM(script, "https://nhandan.vn/")
-      
-      if (data.status === "success") {
-        alert("Script đã chạy thành công!")
-        if (data.generatedScript) {
-          setGeneratedScriptContent(data.generatedScript)
-          // ⭐ Đánh dấu đã chạy DOM
-          setLastRunType("dom")
+      await streamingApiService.runScriptDOMStream(
+        script,
+        "https://nhandan.vn/",
+        {
+          onStart: () => {
+            console.log('Script execution started')
+          },
+          
+          onStep: (stepData: StepProgress) => {
+            console.log('Step update received:', {
+              step: stepData.step,
+              status: stepData.status,
+              message: stepData.message,
+              duration: stepData.duration
+            })
+            
+            setRunProgress(prev => {
+              const newSteps = [...prev.steps]
+              const stepIndex = stepData.step - 1
+              
+              if (stepIndex >= 0 && stepIndex < newSteps.length) {
+                const currentStepStatus = newSteps[stepIndex].status
+                
+                // ✅ CRITICAL: Never override 'error' status
+                if (currentStepStatus === 'error' && stepData.status !== 'error') {
+                  console.log(`🛡️ Protecting error status for step ${stepData.step}`)
+                  newSteps[stepIndex] = {
+                    ...newSteps[stepIndex],
+                    message: newSteps[stepIndex].message,
+                    duration: stepData.duration || newSteps[stepIndex].duration,
+                    timestamp: Date.now()
+                  }
+                } else {
+                  newSteps[stepIndex] = {
+                    ...newSteps[stepIndex],
+                    ...stepData,
+                    timestamp: Date.now()
+                  }
+                }
+                
+                console.log(`Updated step ${stepData.step}:`, newSteps[stepIndex])
+              } else {
+                console.warn(`Invalid step index: ${stepIndex} (step ${stepData.step})`)
+              }
+              
+              const newCurrentStep = stepData.step
+              
+              const newProgress = {
+                ...prev,
+                steps: newSteps,
+                currentStep: newCurrentStep
+              }
+              
+              // ✅ Update ref immediately
+              latestProgressRef.current = newProgress
+              
+              return newProgress
+            })
+          },
+          
+          onInfo: (message: string) => {
+            console.log('Info:', message)
+          },
+          
+          onComplete: (data) => {
+            // ✅ CRITICAL: Prevent duplicate handling
+            if (completionHandledRef.current) {
+              console.warn('⚠️ onComplete already handled, skipping duplicate call')
+              return
+            }
+            completionHandledRef.current = true
+
+            console.log('Execution complete:', {
+              status: data.status,
+              exitCode: data.exitCode,
+              hasGeneratedScript: !!data.generatedScript
+            })
+            
+            // ✅ FIXED: Use setTimeout like Image handler
+            setTimeout(() => {
+              // ✅ Read from ref (most up-to-date state)
+              const finalSteps = latestProgressRef.current.steps
+              const hasFailedSteps = finalSteps.some(s => s.status === 'error')
+              const successCount = finalSteps.filter(s => s.status === 'success').length
+              const failedCount = finalSteps.filter(s => s.status === 'error').length
+              
+              console.log('📊 Final Results:', {
+                hasFailedSteps,
+                successCount,
+                failedCount,
+                totalSteps,
+                steps: finalSteps.map(s => ({ step: s.step, status: s.status }))
+              })
+              
+              setRunProgress(prev => {
+                const newProgress = {
+                  ...prev,
+                  currentStep: hasFailedSteps ? prev.currentStep : totalSteps,
+                  isRunning: false,
+                  endTime: Date.now()
+                }
+                latestProgressRef.current = newProgress
+                return newProgress
+              })
+              
+              if (data.generatedScript) {
+                setGeneratedScriptContent(data.generatedScript)
+              }
+              
+              setIsRunning(false)
+              
+              // ✅ Show alert based on actual results
+              if (data.status === "success" && !hasFailedSteps) {
+                alert(`The script ran successfully!\n\n${successCount}/${totalSteps} steps completed`)
+              } else if (hasFailedSteps) {
+                alert(`Script completed with errors\n\nSuccess: ${successCount}\nFailed: ${failedCount}\n📊 Total: ${totalSteps}`)
+              } else {
+                alert(`Script thất bại với exit code: ${data.exitCode}`)
+              }
+            }, 150) // Wait for all events to process
+          },
+          
+          onError: (error: string) => {
+            console.error('Stream error:', error)
+            
+            if (!completionHandledRef.current) {
+              setRunProgress(prev => ({
+                ...prev,
+                isRunning: false,
+                endTime: Date.now()
+              }))
+              
+              setIsRunning(false)
+              alert(`❌ Lỗi: ${error}`)
+            }
+          }
         }
-        console.log("Output:", data.output)
-      } else {
-        alert(`Lỗi khi chạy script: ${data.message || data.output}`)
-      }
+      )
     } catch (error) {
-      console.error("Error:", error)
-      alert("Không thể kết nối đến server. Vui lòng kiểm tra backend đang chạy.")
-    } finally {
-      setIsRunning(false)
+      console.error("Connection error:", error)
+      
+      if (!completionHandledRef.current) {
+        setRunProgress(prev => ({
+          ...prev,
+          isRunning: false,
+          endTime: Date.now()
+        }))
+        
+        setIsRunning(false)
+        alert("Không thể kết nối đến server. Vui lòng kiểm tra backend đang chạy.")
+      }
     }
   }
 
   const handleRunImage = async () => {
     const script = getScriptContentFromEditor(editorRef.current)
+    const parsedScript = parseScript(script)
+    const totalSteps = parsedScript.filter(l => 
+      l.type === 'image' || (l.type === 'text' && l.content.trim())
+    ).length
     
     if (!script.trim()) {
       alert("Vui lòng nhập script trước khi chạy!")
       return
     }
 
+    console.log(`Starting Image execution with ${totalSteps} steps`)
+    
+    // ✅ RESET completion flag
+    completionHandledRef.current = false
+
+    setLastRunType("image")
+    setContentWhenRunStarted(editorContent)
+
+    const initialSteps: StepProgress[] = Array(totalSteps).fill(null).map((_, i) => ({
+      step: i + 1,
+      status: 'pending' as const,
+      message: '',
+      timestamp: Date.now()
+    }))
+
+    const initialProgress = {
+      currentStep: 0,
+      totalSteps,
+      steps: initialSteps,
+      isRunning: true,
+      startTime: Date.now()
+    }
+
+    setRunProgress(initialProgress)
+    latestProgressRef.current = initialProgress // ✅ Sync ref
+
     setIsRunningImage(true)
+    
     try {
-      const data = await apiService.runScriptImage(script, "https://nhandan.vn/")
-      
-      if (data.status === "success") {
-        alert("Script Image đã chạy thành công!")
-        if (data.generatedScript) {
-          setGeneratedScriptContent(data.generatedScript)
-          // ⭐ Đánh dấu đã chạy Image
-          setLastRunType("image")
+      await streamingApiService.runScriptImageStream(
+        script,
+        "https://nhandan.vn/",
+        {
+          onStart: () => {
+            console.log('Image script execution started')
+          },
+          
+          onStep: (stepData: StepProgress) => {
+            console.log('Step update received:', {
+              step: stepData.step,
+              status: stepData.status,
+              message: stepData.message,
+              duration: stepData.duration
+            })
+            
+            setRunProgress(prev => {
+              const newSteps = [...prev.steps]
+              const stepIndex = stepData.step - 1
+              
+              if (stepIndex >= 0 && stepIndex < newSteps.length) {
+                const currentStepStatus = newSteps[stepIndex].status
+                
+                // ✅ CRITICAL: Never override 'error' status
+                if (currentStepStatus === 'error' && stepData.status !== 'error') {
+                  console.log(`🛡️ Protecting error status for step ${stepData.step}`)
+                  newSteps[stepIndex] = {
+                    ...newSteps[stepIndex],
+                    message: newSteps[stepIndex].message,
+                    duration: stepData.duration || newSteps[stepIndex].duration,
+                    timestamp: Date.now()
+                  }
+                } else {
+                  newSteps[stepIndex] = {
+                    ...newSteps[stepIndex],
+                    ...stepData,
+                    timestamp: Date.now()
+                  }
+                }
+                
+                console.log(`Updated step ${stepData.step}:`, newSteps[stepIndex])
+              } else {
+                console.warn(`Invalid step index: ${stepIndex} (step ${stepData.step})`)
+              }
+              
+              const newCurrentStep = stepData.step
+              
+              const newProgress = {
+                ...prev,
+                steps: newSteps,
+                currentStep: newCurrentStep
+              }
+              
+              // ✅ Update ref immediately
+              latestProgressRef.current = newProgress
+              
+              return newProgress
+            })
+          },
+          
+          onInfo: (message: string) => {
+            console.log('Info:', message)
+          },
+          
+          onComplete: (data) => {
+            // ✅ CRITICAL: Prevent duplicate handling
+            if (completionHandledRef.current) {
+              console.warn('⚠️ onComplete already handled, skipping duplicate call')
+              return
+            }
+            completionHandledRef.current = true
+
+            console.log('Execution complete:', {
+              status: data.status,
+              exitCode: data.exitCode,
+              hasGeneratedScript: !!data.generatedScript
+            })
+            
+            // ✅ Use setTimeout to ensure all step events are processed
+            setTimeout(() => {
+              // ✅ Read from ref (most up-to-date state)
+              const finalSteps = latestProgressRef.current.steps
+              const hasFailedSteps = finalSteps.some(s => s.status === 'error')
+              const successCount = finalSteps.filter(s => s.status === 'success').length
+              const failedCount = finalSteps.filter(s => s.status === 'error').length
+              
+              console.log('📊 Final Results:', {
+                hasFailedSteps,
+                successCount,
+                failedCount,
+                totalSteps,
+                steps: finalSteps.map(s => ({ step: s.step, status: s.status }))
+              })
+              
+              setRunProgress(prev => {
+                const newProgress = {
+                  ...prev,
+                  currentStep: hasFailedSteps ? prev.currentStep : totalSteps,
+                  isRunning: false,
+                  endTime: Date.now()
+                }
+                latestProgressRef.current = newProgress
+                return newProgress
+              })
+              
+              if (data.generatedScript) {
+                setGeneratedScriptContent(data.generatedScript)
+              }
+              
+              setIsRunningImage(false)
+              
+              // ✅ Show alert based on actual results
+              if (data.status === "success" && !hasFailedSteps) {
+                alert(`Image script has finished running!\n\n${successCount}/${totalSteps} steps completed successfully`)
+              } else if (hasFailedSteps) {
+                alert(`Script completed with errors\n\nSuccess: ${successCount}\nFailed: ${failedCount}\n📊 Total: ${totalSteps}`)
+              } else {
+                alert(`Script failed with exit code: ${data.exitCode}`)
+              }
+            }, 150) // Wait for all events to process
+          },
+          
+          onError: (error: string) => {
+            console.error('Stream error:', error)
+            
+            if (!completionHandledRef.current) {
+              setRunProgress(prev => ({
+                ...prev,
+                isRunning: false,
+                endTime: Date.now()
+              }))
+              
+              setIsRunningImage(false)
+              alert(`❌ Lỗi: ${error}`)
+            }
+          }
         }
-        console.log("Output:", data.output)
-      } else {
-        alert(`Lỗi khi chạy script: ${data.message || data.output}`)
-      }
+      )
     } catch (error) {
-      console.error("Error:", error)
-      alert("Không thể kết nối đến server. Vui lòng kiểm tra backend đang chạy.")
-    } finally {
-      setIsRunningImage(false)
+      console.error("Connection error:", error)
+      
+      if (!completionHandledRef.current) {
+        setRunProgress(prev => ({
+          ...prev,
+          isRunning: false,
+          endTime: Date.now()
+        }))
+        
+        setIsRunningImage(false)
+        alert("Không thể kết nối đến server. Vui lòng kiểm tra backend đang chạy.")
+      }
     }
   }
 
@@ -210,7 +573,6 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
   }
 
   const handleGenTestScenario = async (testCaseId: number, testItem: string, imagePath?: string) => {
-    // Mở dialog thay vì chạy trực tiếp
     setIsGenScenarioDialogOpen(true)
   }
 
@@ -218,7 +580,6 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
     try {
       const data = await apiService.uploadImage(file)
       if (data.status === "success" && data.url) {
-        // Trả về URL đầy đủ: http://localhost:8123/uploads/stepImg/obj_upload/obj_xxx.png
         return data.url
       } else {
         alert(`Lỗi upload: ${data.message}`)
@@ -256,18 +617,17 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
 
         setIsGenScenarioDialogOpen(false)
       } else {
-        alert(`❌ Lỗi khi tạo test scenario: ${data.message}\n\nOutput: ${data.output || 'N/A'}`)
+        alert(`Lỗi khi tạo test scenario: ${data.message}\n\nOutput: ${data.output || 'N/A'}`)
       }
     } catch (error) {
       console.error("Error:", error)
       const clientTotalTime = Date.now() - startTime
-      alert(`❌ Không thể kết nối đến server.\n⏱️ Client time: ${clientTotalTime}ms\n\nVui lòng kiểm tra backend đang chạy.`)
+      alert(`Không thể kết nối đến server.\n\nVui lòng kiểm tra backend đang chạy.`)
     } finally {
       setIsGeneratingScenario(false)
     }
   }
 
-  // ⭐ LOGIC MỚI - View Script với fallback
   const handleViewScript = async () => {
     if (!testCase?.id) {
       alert("Không tìm thấy Test Case ID!")
@@ -279,13 +639,13 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
       let scriptContent = ""
       let fromFile = false
 
-      // Bước 1: Thử lấy từ file nếu đã chạy Run (DOM) hoặc Run (Image)
       if (lastRunType === "dom") {
         try {
           const data = await apiService.viewScriptDOM()
           if (data.status === "success" && data.content) {
             scriptContent = data.content
             fromFile = true
+            console.log("✅ Loaded DOM script from file")
           }
         } catch (error) {
           console.log("Không tìm thấy file DOM, sẽ lấy từ database")
@@ -296,21 +656,21 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
           if (data.status === "success" && data.content) {
             scriptContent = data.content
             fromFile = true
+            console.log("✅ Loaded Image script from file")
           }
         } catch (error) {
           console.log("Không tìm thấy file Image, sẽ lấy từ database")
         }
       }
 
-      // Bước 2: Nếu không có từ file, lấy từ database
       if (!scriptContent) {
         const data = await apiService.getTestCaseStep(testCase.id, 1)
         if (data.status === "success" && data.scriptCode && data.scriptCode.trim()) {
           scriptContent = data.scriptCode
+          console.log("📦 Loaded script from database")
         }
       }
 
-      // Bước 3: Hiển thị hoặc báo lỗi
       if (scriptContent) {
         setGeneratedScriptContent(scriptContent)
         setIsViewScriptOpen(true)
@@ -400,6 +760,8 @@ export const useTestCaseDetail = (testCase?: TestCase) => {
     generatedScriptContent,
     copiedUrl,
     editorContent,
+    runProgress,
+    lastRunType,
     
     // Refs
     fileInputRef,

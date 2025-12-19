@@ -1,4 +1,4 @@
-// utils.ts - Chứa các hàm utility (FIXED)
+// utils.ts - Improved parsing
 
 import { ParsedLine } from "./types"
 import { IMAGE_EXTENSIONS } from "./constants"
@@ -18,7 +18,7 @@ export const parseScript = (text: string): ParsedLine[] => {
       }
     }
 
-    // Case 2: Text + [URL] (có brackets) - Ưu tiên check trước
+    // Case 2: Text + [URL] (có brackets)
     const matchWithBrackets = line.match(/^(.+?)\s*\[(https?:\/\/[^\]]+)\]/i)
     if (matchWithBrackets && IMAGE_EXTENSIONS.test(matchWithBrackets[2])) {
       return {
@@ -29,8 +29,7 @@ export const parseScript = (text: string): ParsedLine[] => {
       }
     }
 
-    // Case 3 (MỚI): Text + URL (không có brackets)
-    // Tìm URL ảnh ở bất kỳ đâu trong dòng
+    // Case 3: Text + URL (không có brackets)
     const imageUrlMatch = trimmedLine.match(/(https?:\/\/\S+)/i)
     if (imageUrlMatch && IMAGE_EXTENSIONS.test(imageUrlMatch[1])) {
       const imageUrl = imageUrlMatch[1]
@@ -52,7 +51,7 @@ export const parseScript = (text: string): ParsedLine[] => {
   })
 }
 
-export const getScriptContentFromEditor = (editorElement: HTMLDivElement | null): string => {
+export const getScriptContentFromEditor = (editorElement: HTMLDivElement | HTMLElement | null): string => {
   if (!editorElement) return ""
   
   const result: string[] = []
@@ -66,13 +65,11 @@ export const getScriptContentFromEditor = (editorElement: HTMLDivElement | null)
     } else if (node.nodeName === "BR") {
       return "\n"
     } else if (node.nodeName === "DIV") {
-      // Process children of DIV
       const childContent = Array.from(node.childNodes)
         .map(child => processNode(child))
         .join("")
       return "\n" + childContent
     } else {
-      // Process children of other elements
       return Array.from(node.childNodes)
         .map(child => processNode(child))
         .join("")

@@ -1,8 +1,7 @@
 "use client"
 
-// TestCaseDetailScreen.tsx - Main component (refactored)
-
 import type React from "react"
+import { useMemo } from "react" // ← THÊM import
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog } from "@/components/ui/dialog"
 
@@ -22,9 +21,6 @@ import { GenScenarioDialog } from "./components/GenScenarioDialog"
 
 export function TestCaseDetailScreen({ onBack, testCase, initialView }: TestCaseDetailScreenProps) {
   const currentTestCase = testCase || DEFAULT_TEST_CASE
-  
-  // Bạn có thể sử dụng initialView ở đây nếu cần
-  // const [currentView, setCurrentView] = useState(initialView || "default")
 
   const {
     uploadedImages,
@@ -40,6 +36,8 @@ export function TestCaseDetailScreen({ onBack, testCase, initialView }: TestCase
     isGenScenarioDialogOpen,
     generatedScriptContent,
     copiedUrl,
+    editorContent, // ← SỬ DỤNG state này
+    runProgress,
     fileInputRef,
     editorRef,
     setIsImageLibraryOpen,
@@ -61,7 +59,6 @@ export function TestCaseDetailScreen({ onBack, testCase, initialView }: TestCase
     handleSaveScriptCode,
   } = useTestCaseDetail(testCase)
 
-  // Xử lý paste ảnh
   const handlePaste = async (e: React.ClipboardEvent<HTMLDivElement>) => {
     const items = e.clipboardData.items
 
@@ -92,18 +89,21 @@ export function TestCaseDetailScreen({ onBack, testCase, initialView }: TestCase
             range.deleteContents()
             range.insertNode(img)
             
-            // Thêm space sau ảnh để có thể gõ tiếp
             const space = document.createTextNode(" ")
             range.setStartAfter(img)
             range.insertNode(space)
             
-            // Di chuyển cursor sau space
             range.setStartAfter(space)
             range.setEndAfter(space)
             selection.removeAllRanges()
             selection.addRange(range)
           } else if (editorRef.current) {
             editorRef.current.appendChild(img)
+          }
+
+          // ✅ THÊM: Update state ngay sau khi insert image
+          if (editorRef.current) {
+            setEditorContent(editorRef.current.innerHTML)
           }
         }
       }
@@ -130,7 +130,13 @@ export function TestCaseDetailScreen({ onBack, testCase, initialView }: TestCase
     }
   }
 
-  const parsedLines = parseScript(getScriptContentFromEditor(editorRef.current))
+  // ✅ FIX: Parse từ editorContent state, memoize để optimize performance
+  const parsedLines = useMemo(() => {
+    // Tạo temporary div để parse HTML
+    const tempDiv = document.createElement('div')
+    tempDiv.innerHTML = editorContent
+    return parseScript(getScriptContentFromEditor(tempDiv))
+  }, [editorContent]) // Re-calculate khi editorContent thay đổi
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -181,7 +187,14 @@ export function TestCaseDetailScreen({ onBack, testCase, initialView }: TestCase
 
               <ScriptEditor editorRef={editorRef} onPaste={handlePaste} onInput={handleEditorInput} />
 
-              <ScriptPreview lines={parsedLines} />
+              {/* ✅ parsedLines giờ được tính từ editorContent state */}
+              <ScriptPreview 
+                lines={parsedLines}
+                progress={runProgress.steps}
+                isRunning={runProgress.isRunning}
+                currentStep={runProgress.currentStep}
+                totalSteps={runProgress.totalSteps}
+              />
             </div>
           </CardContent>
         </Card>
