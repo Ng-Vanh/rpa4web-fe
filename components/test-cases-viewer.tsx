@@ -18,6 +18,7 @@ interface Scenario {
   S_id: string
   "Title": string
   Precondition: string
+  Postcondition?: string
   Steps: string[]
   "Expected Result": string
   s_id: string
@@ -1438,6 +1439,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       S_id: "NEW", // Đơn giản hóa
       "Title": "New Scenario",
       Precondition: "Enter precondition here...",
+      Postcondition: "Enter postcondition here...",
       Steps: ["Step 1: Enter action here..."],
       "Expected Result": "Enter expected result here...",
       s_id: "NEW", // Đơn giản hóa
@@ -1703,6 +1705,23 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                         />
                       ) : (
                         <span className="text-gray-600">{scenario.Precondition}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Postcondition */}
+                  <div className="mb-4">
+                    <div className="flex items-start space-x-2">
+                      <span className="font-semibold text-gray-700 min-w-[100px]">Postcondition:</span>
+                      {isEditing ? (
+                        <Textarea
+                          value={editedScenario.Postcondition ?? ""}
+                          onChange={(e) => handleFieldChange(scenario.id!, "Postcondition", e.target.value)}
+                          className="flex-1"
+                          rows={2}
+                        />
+                      ) : (
+                        <span className="text-gray-600">{scenario.Postcondition ?? ""}</span>
                       )}
                     </div>
                   </div>
