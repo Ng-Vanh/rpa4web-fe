@@ -122,7 +122,7 @@ export function TestCaseDetailScreen({
   const [isEditing, setIsEditing] = useState(false);
   const [isStepModalOpen, setIsStepModalOpen] = useState(false);
   const [editingStep, setEditingStep] = useState<any>(null);
-  const [stepColumnWidth, setStepColumnWidth] = useState(425);
+  const [stepColumnWidth, setStepColumnWidth] = useState(440);
   const [isResizing, setIsResizing] = useState(false);
 
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
@@ -1726,20 +1726,27 @@ export function TestCaseDetailScreen({
                 Run Test
               </Button> */}
 
-              <Button
+              {/* <Button
                 variant="outline"
                 onClick={handleGenerateScript}
                 disabled={isGeneratingScript}
               >
                 <FileCode className="h-4 w-4 mr-2" />
                 {isGeneratingScript ? "Generating..." : "Generate Test Script"}
-              </Button>
+              </Button> */}
 
-              {/* <DropdownMenu>
+              <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline">
-                    <Code className="h-4 w-4 mr-2" />
-                    Script Actions
+                  <Button variant="outline" disabled={isGeneratingScript || isGeneratingScriptByModel || isGeneratingAllScripts}>
+                    {(isGeneratingScript || isGeneratingScriptByModel || isGeneratingAllScripts) ? (
+                      <svg className="h-4 w-4 mr-2 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                      </svg>
+                    ) : (
+                      <Code className="h-4 w-4 mr-2" />
+                    )}
+                    {(isGeneratingScript || isGeneratingScriptByModel || isGeneratingAllScripts) ? "Processing..." : "Script Actions"}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
@@ -1779,7 +1786,7 @@ export function TestCaseDetailScreen({
                     View Full Script
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu> */}
+              </DropdownMenu>
             </div>
           )}
         </div>
