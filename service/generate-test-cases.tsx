@@ -29,6 +29,7 @@ export interface GeneratedScenariosResponse {
     S_id: string;
     Title: string;
     Precondition: string;
+    Postcondition?: string;
     Steps: string[];
     "Expected Result": string;
     s_id: string;
