@@ -1726,7 +1726,16 @@ export function TestCaseDetailScreen({
                 Run Test
               </Button> */}
 
-              <DropdownMenu>
+              <Button
+                variant="outline"
+                onClick={handleGenerateScript}
+                disabled={isGeneratingScript}
+              >
+                <FileCode className="h-4 w-4 mr-2" />
+                {isGeneratingScript ? "Generating..." : "Generate Test Script"}
+              </Button>
+
+              {/* <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="outline">
                     <Code className="h-4 w-4 mr-2" />
@@ -1770,7 +1779,7 @@ export function TestCaseDetailScreen({
                     View Full Script
                   </DropdownMenuItem>
                 </DropdownMenuContent>
-              </DropdownMenu>
+              </DropdownMenu> */}
             </div>
           )}
         </div>

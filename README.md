@@ -43,3 +43,6 @@
 Thêm biến môi trường cho backend generate test cases:
 ```env
 NEXT_PUBLIC_GEN_TC_BACKEND_URL=http://localhost:9002/process
+
+
+npm run dev
