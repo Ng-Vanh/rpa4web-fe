@@ -12,6 +12,8 @@ import { getScenariosJSONByAbsPath, validateResponse, GeneratedScenariosResponse
 import { JSONViewer } from "@/components/json-viewer"
 import { TestCasesViewer } from "@/components/test-cases-viewer"
 import { createScenario, getScenariosBySrsId } from "@/service/scenario"
+import { getAllTestCases } from "@/service/testcase"
+import { getAllTestCaseSteps, getLatestScore } from "@/service/testcase-step"
 
 interface SRSWorkspaceProps {
   srs: any
@@ -28,6 +30,14 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
   const [generationError, setGenerationError] = useState<string | null>(null)
   const [hasExistingScenarios, setHasExistingScenarios] = useState(false)
   const [loadingExisting, setLoadingExisting] = useState(false)
+  const [reportStats, setReportStats] = useState<{
+    totalScenarios: number
+    totalTestCases: number
+    totalSteps: number
+    executedSteps: number
+    stepsWithHighScore: number
+  } | null>(null)
+  const [reportLoading, setReportLoading] = useState(false)
 
   // Kiểm tra DB đã có scenarios cho SRS này chưa
   useEffect(() => {
@@ -202,27 +212,72 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
     }
   }
 
-  const handleExportReport = () => {
+  const handleExportReport = async () => {
     setShowExportReport(true)
+    setReportLoading(true)
+    try {
+      const scenarios = await getScenariosBySrsId(srs.id)
+      const scenarioList = Array.isArray(scenarios) ? scenarios : []
+
+      // Fetch test cases for all scenarios in parallel
+      const testCasesPerScenario = await Promise.all(
+        scenarioList.map((s: any) =>
+          getAllTestCases(s.id).then((r: any) => r.data || r).catch(() => [])
+        )
+      )
+      const allTestCases = testCasesPerScenario.flat()
+
+      // Fetch steps for all test cases in parallel
+      const stepsPerTestCase = await Promise.all(
+        allTestCases.map((tc: any) =>
+          getAllTestCaseSteps(tc.id).then((r: any) => r.data || r).catch(() => [])
+        )
+      )
+      const allSteps = stepsPerTestCase.flat()
+
+      // Fetch latest score for all steps in parallel
+      const scores = await Promise.all(
+        allSteps.map((step: any) => getLatestScore(step.id))
+      )
+
+      const executedSteps = scores.filter((s) => s !== null).length
+      const stepsWithHighScore = scores.filter((s) => s !== null && s >= 0.5).length
+
+      setReportStats({
+        totalScenarios: scenarioList.length,
+        totalTestCases: allTestCases.length,
+        totalSteps: allSteps.length,
+        executedSteps,
+        stepsWithHighScore,
+      })
+    } catch (e) {
+      console.error("Failed to load report stats:", e)
+    } finally {
+      setReportLoading(false)
+    }
   }
 
   const generateReportData = () => {
-    const totalTestCases = 13
-    const successfulTestCases = 9
-    const failedTestCases = 4
-    const successRate = Math.round((successfulTestCases / totalTestCases) * 100)
+    const totalScenarios = reportStats?.totalScenarios ?? (generationComplete ? generatedStats.scenarios : 0)
+    const totalTestCases = reportStats?.totalTestCases ?? 0
+    const totalSteps = reportStats?.totalSteps ?? 0
+    const executedSteps = reportStats?.executedSteps ?? 0
+    const stepsWithHighScore = reportStats?.stepsWithHighScore ?? 0
+    const pendingSteps = totalSteps - executedSteps
+    const successRate = executedSteps > 0 ? Math.round((stepsWithHighScore / executedSteps) * 100) : 0
+    const stepSuccessRate = totalSteps > 0 ? Math.round((stepsWithHighScore / totalSteps) * 100) : 0
 
     return {
       srsName: srs.name,
-      totalScenarios: generationComplete ? generatedStats.scenarios : 3,
+      totalScenarios,
       totalTestCases,
-      successfulTestCases,
-      failedTestCases,
+      totalSteps,
+      executedSteps,
+      pendingSteps,
+      stepsWithHighScore,
       successRate,
+      stepSuccessRate,
       generatedDate: new Date().toLocaleDateString(),
-      testSteps: 45,
-      executedSteps: 32,
-      stepSuccessRate: Math.round((32 / 45) * 100),
     }
   }
 
@@ -239,21 +294,15 @@ SUMMARY
 -------
 Total Scenarios: ${reportData.totalScenarios}
 Total Test Cases: ${reportData.totalTestCases}
-Successful Test Cases: ${reportData.successfulTestCases}
-Failed Test Cases: ${reportData.failedTestCases}
-Overall Success Rate: ${reportData.successRate}%
 
 TEST STEPS
 ----------
-Total Steps: ${reportData.testSteps}
+Total Steps: ${reportData.totalSteps}
 Executed Steps: ${reportData.executedSteps}
-Step Success Rate: ${reportData.stepSuccessRate}%
-
-DETAILED BREAKDOWN
-------------------
-- Functional Tests: 8 cases (75% success rate)
-- Integration Tests: 3 cases (67% success rate)
-- UI Tests: 2 cases (100% success rate)
+Pending Steps: ${reportData.pendingSteps}
+Steps Passed (score >= 50%): ${reportData.stepsWithHighScore}
+Step Pass Rate: ${reportData.stepSuccessRate}%
+Overall Score Rate (executed): ${reportData.successRate}%
 
 Generated by RPA4Web Testing Tool
     `.trim()
@@ -381,7 +430,7 @@ Generated by RPA4Web Testing Tool
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
             <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={hasExistingScenarios ? handleViewScenarios : handleGenerateScenarios}>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-3 mb-3">
@@ -421,7 +470,7 @@ Generated by RPA4Web Testing Tool
               </CardContent>
             </Card>
 
-            <Card className="cursor-pointer hover:shadow-md transition-shadow">
+            {/* <Card className="cursor-pointer hover:shadow-md transition-shadow">
               <CardContent className="p-6">
                 <div className="flex items-center space-x-3 mb-3">
                   <div className="p-2 bg-orange-100 rounded-lg">
@@ -431,7 +480,7 @@ Generated by RPA4Web Testing Tool
                 </div>
                 <p className="text-sm text-muted-foreground">Review test execution history and changes</p>
               </CardContent>
-            </Card>
+            </Card> */}
 
             <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={handleExportReport}>
               <CardContent className="p-6">
@@ -456,29 +505,23 @@ Generated by RPA4Web Testing Tool
               <CardDescription>Comprehensive test case and execution summary</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              {(() => {
+              {reportLoading ? (
+                <div className="text-center py-8 text-muted-foreground">Loading report data...</div>
+              ) : (() => {
                 const reportData = generateReportData()
                 return (
                   <>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <h4 className="font-medium">Test Cases Overview</h4>
+                        <h4 className="font-medium">Scenarios & Test Cases</h4>
                         <div className="space-y-1 text-sm">
+                          <div className="flex justify-between">
+                            <span>Total Scenarios:</span>
+                            <span className="font-medium">{reportData.totalScenarios}</span>
+                          </div>
                           <div className="flex justify-between">
                             <span>Total Test Cases:</span>
                             <span className="font-medium">{reportData.totalTestCases}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Successful:</span>
-                            <span className="font-medium text-green-600">{reportData.successfulTestCases}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Failed:</span>
-                            <span className="font-medium text-red-600">{reportData.failedTestCases}</span>
-                          </div>
-                          <div className="flex justify-between border-t pt-1">
-                            <span>Success Rate:</span>
-                            <span className="font-medium">{reportData.successRate}%</span>
                           </div>
                         </div>
                       </div>
@@ -488,7 +531,7 @@ Generated by RPA4Web Testing Tool
                         <div className="space-y-1 text-sm">
                           <div className="flex justify-between">
                             <span>Total Steps:</span>
-                            <span className="font-medium">{reportData.testSteps}</span>
+                            <span className="font-medium">{reportData.totalSteps}</span>
                           </div>
                           <div className="flex justify-between">
                             <span>Executed:</span>
@@ -496,24 +539,20 @@ Generated by RPA4Web Testing Tool
                           </div>
                           <div className="flex justify-between">
                             <span>Pending:</span>
-                            <span className="font-medium text-orange-600">
-                              {reportData.testSteps - reportData.executedSteps}
-                            </span>
+                            <span className="font-medium text-orange-600">{reportData.pendingSteps}</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Passed (score ≥ 50%):</span>
+                            <span className="font-medium text-green-600">{reportData.stepsWithHighScore}</span>
                           </div>
                           <div className="flex justify-between border-t pt-1">
-                            <span>Step Success Rate:</span>
+                            <span>Pass Rate (of executed):</span>
+                            <span className="font-medium">{reportData.successRate}%</span>
+                          </div>
+                          <div className="flex justify-between">
+                            <span>Pass Rate (of total):</span>
                             <span className="font-medium">{reportData.stepSuccessRate}%</span>
                           </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2">
-                      <h4 className="font-medium">Scenarios Summary</h4>
-                      <div className="text-sm">
-                        <div className="flex justify-between">
-                          <span>Total Scenarios:</span>
-                          <span className="font-medium">{reportData.totalScenarios}</span>
                         </div>
                       </div>
                     </div>

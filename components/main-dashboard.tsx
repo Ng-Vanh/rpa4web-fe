@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -14,6 +14,7 @@ import { SRSManagement } from "@/components/srs-management"
 import { SRSUploadScreen } from "@/components/srs-upload-screen"
 import { SRSWorkspace } from "@/components/srs-workspace"
 import { RunConfigManagementScreen } from "@/components/run-config-management-screen"
+import { getSrsDocument } from "@/service/srs_document"
 
 interface MainDashboardProps {
   user: any
@@ -28,6 +29,20 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
 
   const [llmConfigOpen, setLlmConfigOpen] = useState(false)
   const [runConfigOpen, setRunConfigOpen] = useState(false)
+  const [recentSRS, setRecentSRS] = useState<any[]>([])
+
+  useEffect(() => {
+    if (!user?.id) return
+    getSrsDocument(user.id)
+      .then((data: any) => {
+        const list: any[] = Array.isArray(data) ? data : data?.data ?? []
+        const sorted = [...list].sort(
+          (a, b) => new Date(b.updatedAt ?? b.updated_at ?? 0).getTime() - new Date(a.updatedAt ?? a.updated_at ?? 0).getTime()
+        )
+        setRecentSRS(sorted.slice(0, 2))
+      })
+      .catch(() => {})
+  }, [user?.id])
 
   const [llmConfig, setLlmConfig] = useState({
     model: "",
@@ -285,19 +300,39 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
           <Card>
             <CardHeader>
               <CardTitle>Recent Activity</CardTitle>
-              <CardDescription>Your latest testing activities</CardDescription>
+              <CardDescription>Your latest SRS documents</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
-                <div className="text-sm">
-                  <p className="font-medium">SRS Booking System</p>
-                  <p className="text-muted-foreground">Last modified 2 hours ago</p>
+              {recentSRS.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No recent activity</p>
+              ) : (
+                <div className="space-y-3">
+                  {recentSRS.map((srs) => {
+                    const updated = srs.updatedAt ?? srs.updated_at
+                    const timeAgo = updated
+                      ? (() => {
+                          const diff = Date.now() - new Date(updated).getTime()
+                          const mins = Math.floor(diff / 60000)
+                          if (mins < 60) return `${mins} minute${mins !== 1 ? "s" : ""} ago`
+                          const hrs = Math.floor(mins / 60)
+                          if (hrs < 24) return `${hrs} hour${hrs !== 1 ? "s" : ""} ago`
+                          const days = Math.floor(hrs / 24)
+                          return `${days} day${days !== 1 ? "s" : ""} ago`
+                        })()
+                      : "—"
+                    return (
+                      <div
+                        key={srs.id}
+                        className="text-sm cursor-pointer hover:bg-muted/50 rounded p-1 -mx-1 transition-colors"
+                        onClick={() => handleNavigateToWorkspace(srs)}
+                      >
+                        <p className="font-medium truncate">{srs.name}</p>
+                        <p className="text-muted-foreground">Last modified {timeAgo}</p>
+                      </div>
+                    )
+                  })}
                 </div>
-                <div className="text-sm">
-                  <p className="font-medium">Payment Flow Tests</p>
-                  <p className="text-muted-foreground">Last modified 1 day ago</p>
-                </div>
-              </div>
+              )}
             </CardContent>
           </Card>
         </div>
