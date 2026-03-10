@@ -1721,10 +1721,10 @@ export function TestCaseDetailScreen({
           </div>
           {viewMode === "execution" && (
             <div className="flex items-center space-x-2">
-              <Button>
+              {/* <Button>
                 <Play className="h-4 w-4 mr-2" />
                 Run Test
-              </Button>
+              </Button> */}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
