@@ -6,14 +6,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Plus, Play, Settings, User, Globe, CheckCircle, X } from "lucide-react"
+import { ArrowLeft, Plus, Play, Settings, User, Globe, CheckCircle, X, Trash2 } from "lucide-react"
 import { TestCaseDetailScreen } from "@/components/test-case-detail-screen"
 import { SimpleTestCaseModal } from "@/components/simple-test-case-modal"
 import { getListTestScenarios, createTestScenario } from "@/service/testscenario"
-import { getAllTestCases, createTestCase } from "@/service/testcase"
+import { getAllTestCases, createTestCase, deleteTestCase } from "@/service/testcase"
+import { deleteScenario } from "@/service/scenario"
 import { toast } from "@/components/ui/use-toast"
 
 interface TestScenarioScreenProps {
@@ -43,6 +45,7 @@ interface TestCase {
     name: string
   },
   testItem: string,
+  description: string,
   testClassification: string,
   runConfig?: string,
   createdAt: string,
@@ -62,6 +65,13 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
   const [loading, setLoading] = useState(true)
   const [testCasesLoading, setTestCasesLoading] = useState(false)
   const [createTestCaseLoading, setCreateTestCaseLoading] = useState(false)
+  const [scenarioCaseCounts, setScenarioCaseCounts] = useState<{ [scenarioId: number]: number }>({})
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+    onConfirm: () => void
+  }>({ open: false, title: "", description: "", onConfirm: () => {} })
 
   // States cho Create Test Scenario Dialog
   const [isCreateScenarioDialogOpen, setIsCreateScenarioDialogOpen] = useState(false)
@@ -83,10 +93,25 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
     try {
       setLoading(true)
       const response = await getListTestScenarios(srsId)
-      setScenarios(response.data || response)
-      if ((response.data || response).length > 0) {
-        setSelectedScenario((response.data || response)[0])
+      const list: TestScenario[] = response.data || response
+      setScenarios(list)
+      if (list.length > 0) {
+        setSelectedScenario(list[0])
       }
+      // fetch test case counts for all scenarios in parallel
+      const counts = await Promise.all(
+        list.map(async (s) => {
+          try {
+            const r = await getAllTestCases(s.id)
+            return { id: s.id, count: (r.data || r).length }
+          } catch {
+            return { id: s.id, count: 0 }
+          }
+        })
+      )
+      const countsMap: { [id: number]: number } = {}
+      counts.forEach(({ id, count }) => { countsMap[id] = count })
+      setScenarioCaseCounts(countsMap)
     } catch (error) {
       console.error("Failed to fetch test scenarios:", error)
       setScenarios([])
@@ -111,7 +136,9 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
       try {
         setTestCasesLoading(true)
         const response = await getAllTestCases(selectedScenario.id)
-        setTestCases(response.data || response)
+        const cases = response.data || response
+        setTestCases(cases)
+        setScenarioCaseCounts((prev) => ({ ...prev, [selectedScenario.id]: cases.length }))
       } catch (error) {
         console.error("Failed to fetch test cases:", error)
         setTestCases([])
@@ -250,6 +277,58 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
     }
   }
 
+  const handleDeleteTestCase = async (e: React.MouseEvent, testCaseId: number) => {
+    e.stopPropagation()
+    setConfirmDialog({
+      open: true,
+      title: "Delete Test Case",
+      description: "Are you sure you want to delete this test case? This action cannot be undone.",
+      onConfirm: async () => {
+        try {
+          await deleteTestCase(testCaseId)
+          const updated = testCases.filter((tc) => tc.id !== testCaseId)
+          setTestCases(updated)
+          if (selectedScenario) {
+            setScenarioCaseCounts((prev) => ({ ...prev, [selectedScenario.id]: updated.length }))
+          }
+          toast({ title: "Success", description: "Test case deleted successfully" })
+        } catch (error) {
+          console.error("Failed to delete test case:", error)
+          toast({ title: "Error", description: "Failed to delete test case", variant: "destructive" })
+        }
+      },
+    })
+  }
+
+  const handleDeleteScenario = async (e: React.MouseEvent, scenarioId: number) => {
+    e.stopPropagation()
+    setConfirmDialog({
+      open: true,
+      title: "Delete Scenario",
+      description: "Are you sure you want to delete this scenario and all its test cases? This action cannot be undone.",
+      onConfirm: async () => {
+        try {
+          await deleteScenario(scenarioId)
+          const updated = scenarios.filter((s) => s.id !== scenarioId)
+          setScenarios(updated)
+          if (selectedScenario?.id === scenarioId) {
+            setSelectedScenario(updated[0] ?? null)
+            setTestCases([])
+          }
+          setScenarioCaseCounts((prev) => {
+            const next = { ...prev }
+            delete next[scenarioId]
+            return next
+          })
+          toast({ title: "Success", description: "Scenario deleted successfully" })
+        } catch (error) {
+          console.error("Failed to delete scenario:", error)
+          toast({ title: "Error", description: "Failed to delete scenario", variant: "destructive" })
+        }
+      },
+    })
+  }
+
   const handleScenarioSelect = (scenario: TestScenario) => {
     setSelectedScenario(scenario)
   }
@@ -332,9 +411,9 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                           : ""
                         }
                       </p>
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between pt-4">
                         <Badge variant="secondary" className="text-xs">
-                          {testCases.length} test cases
+                          {scenarioCaseCounts[scenario.id] ?? 0} test cases
                         </Badge>
                       </div>
                     </div>
@@ -385,10 +464,10 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    <TableHead>Test Item</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead>Updated</TableHead>
-                    <TableHead>Last Run</TableHead>
-                    <TableHead>Status</TableHead>
+                    <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -403,10 +482,14 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                           <div className="font-medium">
                             {index + 1}. {testCase.testItem}
                           </div>
-                          <div className="text-sm text-muted-foreground">{testCase.testClassification}</div>
                           {testCase.runConfig && (
                             <div className="text-xs text-muted-foreground">Config: {testCase.runConfig}</div>
                           )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="text-sm">
+                          <div className="text-sm">{testCase.testClassification}</div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -422,18 +505,29 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
                         <div className="text-sm">{new Date(testCase.updatedAt).toLocaleDateString()}</div>
                       </TableCell>
                       <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                          onClick={(e) => handleDeleteTestCase(e, testCase.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                      
+                      {/* <TableCell>
                         <div className="text-sm">
                           <div>-</div>
                           <div className="text-muted-foreground">-</div>
                         </div>
-                      </TableCell>
-                      <TableCell>
+                      </TableCell> */}
+                      {/* <TableCell>
                         <div className="flex items-center space-x-1">
                           <CheckCircle className="h-4 w-4 text-green-600" />
                           <CheckCircle className="h-4 w-4 text-green-600" />
                           <CheckCircle className="h-4 w-4 text-green-600" />
                         </div>
-                      </TableCell>
+                      </TableCell> */}
                     </TableRow>
                   ))}
                 </TableBody>
@@ -601,6 +695,28 @@ export function TestScenarioScreen({ onBack, srsId }: TestScenarioScreenProps) {
         onSave={handleSaveSimpleTestCase}
         scenarioId={selectedScenario?.id || 0}
       />
+
+      {/* Confirm Dialog */}
+      <AlertDialog open={confirmDialog.open} onOpenChange={(open) => setConfirmDialog((prev) => ({ ...prev, open }))}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmDialog.title}</AlertDialogTitle>
+            <AlertDialogDescription>{confirmDialog.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => {
+                setConfirmDialog((prev) => ({ ...prev, open: false }))
+                confirmDialog.onConfirm()
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

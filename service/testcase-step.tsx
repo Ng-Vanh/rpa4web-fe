@@ -368,6 +368,18 @@ const getExecutionSteps = async (executionId: number) => {
   }
 };
 
+const getLatestScore = async (stepId: number): Promise<number | null> => {
+  try {
+    const response = await axios.get(
+      `${API_BASE_URL}/test-execution-steps/${stepId}/latest-score`,
+      { headers: { ...getAuthHeaders() } }
+    );
+    return response.data.score ?? null;
+  } catch {
+    return null;
+  }
+};
+
 const checkScore = async (stepId: number) => {
     try {
         if (!stepId || stepId <= 0) {
@@ -404,4 +416,5 @@ export {
   executeStep,
   getExecutionSteps,
   checkScore,
+  getLatestScore,
 };

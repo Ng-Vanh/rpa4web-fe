@@ -3,6 +3,7 @@ import { getAuthHeaders } from "./auth-utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
 
+// By Vanh
 const generateTestScript = async (testCaseId: number) => {
     try {
         const response = await axios.post(`${API_BASE_URL}/gen/generate/${testCaseId}`, {}, {
@@ -14,6 +15,21 @@ const generateTestScript = async (testCaseId: number) => {
         throw error;
     }
 };
+const generateTestScriptByModel = async (testCaseId: number) => {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/gen/generate-model/${testCaseId}`, {}, {
+            headers: getAuthHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error generating test script By model:", error);
+        throw error;
+    }
+};
+
+
+
+// By Thu
 
 const generateAllTestScripts = async (testCaseId: number) => {
     try {
@@ -39,4 +55,4 @@ const getTestScript = async (testCaseId: number) => {
     }
 };
 
-export { generateTestScript, generateAllTestScripts, getTestScript };
+export { generateTestScript, generateTestScriptByModel, generateAllTestScripts, getTestScript };

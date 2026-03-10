@@ -37,11 +37,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  mockExpectedResults,
-  mockExecutionSteps,
-  mockVerifications,
-} from "@/lib/mock-data";
+
 import { StepEditModal } from "@/components/step-edit-modal";
 import { ImageViewerModal } from "@/components/image-viewer-modal";
 import { getTestCaseById } from "@/service/testcase";
@@ -55,6 +51,7 @@ import {
 } from "@/service/testcase-step";
 import {
   generateTestScript,
+  generateTestScriptByModel,
   generateAllTestScripts,
   getTestScript,
 } from "@/service/gen-script";
@@ -62,6 +59,7 @@ import {
   executeStep,
   getExecutionSteps,
   checkScore,
+  getLatestScore,
 } from "@/service/testcase-step";
 import { IconExpandButton } from "./ui/icon-expand-button";
 
@@ -128,9 +126,11 @@ export function TestCaseDetailScreen({
   const [isResizing, setIsResizing] = useState(false);
 
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [isGeneratingScriptByModel, setIsGeneratingScriptByModel] = useState(false);
   const [isGeneratingAllScripts, setIsGeneratingAllScripts] = useState(false);
 
   const [executingSteps, setExecutingSteps] = useState<Set<number>>(new Set());
+  const [checkingScoreSteps, setCheckingScoreSteps] = useState<Set<number>>(new Set());
 
   const [isScriptModalOpen, setIsScriptModalOpen] = useState(false);
   const [fullScript, setFullScript] = useState<string>("");
@@ -222,6 +222,22 @@ export function TestCaseDetailScreen({
 
       setSteps(transformedSteps);
       setEditSteps(transformedSteps);
+
+      // Load scores đã lưu trong DB cho từng step
+      const scoreEntries = await Promise.all(
+        transformedSteps.map(async (step: TestCaseStep) => {
+          const score = await getLatestScore(step.id);
+          return score !== null ? [step.id, { score, status: "Checked" }] : null;
+        })
+      );
+      const loadedScores: { [key: number]: { score: number; status: string } } = {};
+      for (const entry of scoreEntries) {
+        if (entry) {
+          const [id, val] = entry as [number, { score: number; status: string }];
+          loadedScores[id] = val;
+        }
+      }
+      setStepScoreResults(loadedScores);
     } catch (error) {
       console.error("Failed to fetch test case steps:", error);
       setSteps([]);
@@ -539,16 +555,16 @@ export function TestCaseDetailScreen({
     setSelectedStep(step);
   };
 
-  const handleVerifyOutputs = () => {
-    setVerificationResults({
-      overallScore: 0.95,
-      stepResults: steps.map((step) => ({
-        stepId: step.id,
-        score: Math.random() > 0.2 ? 1 : 0.8,
-        status: Math.random() > 0.2 ? "Matched" : "Partial Match",
-      })),
-    });
-  };
+  // const handleVerifyOutputs = () => {
+  //   setVerificationResults({
+  //     overallScore: 0.95,
+  //     stepResults: steps.map((step) => ({
+  //       stepId: step.id,
+  //       score: Math.random() > 0.2 ? 1 : 0.8,
+  //       status: Math.random() > 0.2 ? "Matched" : "Partial Match",
+  //     })),
+  //   });
+  // };
 
   const handleGenerateScript = async () => {
     try {
@@ -573,6 +589,29 @@ export function TestCaseDetailScreen({
       setIsGeneratingScript(false);
     }
   };
+  const handleGenerateScriptByModel = async () => {
+     try {
+      setIsGeneratingScriptByModel(true);
+      console.log("Generating test script by model for test case:", testCase.id);
+
+      const script = await generateTestScriptByModel(testCase.id);
+      console.log("Generated script:", script);
+
+      await fetchTestCaseSteps();
+
+      setViewMode("execution");
+    } catch (error) {
+      console.error("Failed to generate test script by model:", error);
+
+      let errorMessage = "Failed to generate test script by model. Please try again.";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      alert(errorMessage);
+    } finally {
+      setIsGeneratingScriptByModel(false);
+    }
+  }
 
   const handleGenerateAllScripts = async () => {
     try {
@@ -729,6 +768,7 @@ export function TestCaseDetailScreen({
   };
 
   const handleCheckStepScore = async (stepId: number) => {
+    setCheckingScoreSteps((prev) => new Set(prev).add(stepId));
     try {
       const result = await checkScore(stepId);
 
@@ -751,6 +791,12 @@ export function TestCaseDetailScreen({
           status: "Error",
         },
       }));
+    } finally {
+      setCheckingScoreSteps((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(stepId);
+        return newSet;
+      });
     }
   };
 
@@ -1094,6 +1140,20 @@ export function TestCaseDetailScreen({
                   ? "Regenerate Test Script"
                   : "Generate Test Script"}
               </Button>
+
+              <Button
+                onClick={handleGenerateScriptByModel}
+                disabled={isGeneratingScriptByModel || steps.length === 0}
+                className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed"
+                size="lg"
+              >
+                <FileCode className="h-4 w-4 mr-2" />
+                {isGeneratingScriptByModel
+                  ? "Generating..."
+                  : hasBeenGenerated
+                  ? "Regenerate Script By Model"
+                  : "Generate Script By Model"}
+              </Button>
             </div>
 
             <div className="text-sm text-muted-foreground space-y-2">
@@ -1110,6 +1170,14 @@ export function TestCaseDetailScreen({
                   : hasBeenGenerated
                   ? "Regenerate executable test scripts with latest changes"
                   : "Generate executable test scripts from this test case"}
+              </p>
+              <p>
+                <strong>Generate By Model:</strong>{" "}
+                {isGeneratingScriptByModel
+                  ? "Generating test scripts by model..."
+                  : hasBeenGenerated
+                  ? "Regenerate test scripts using AI model"
+                  : "Generate test scripts using AI model"}
               </p>
             </div>
           </CardContent>
@@ -1386,7 +1454,7 @@ export function TestCaseDetailScreen({
                             ? "Design screenshot"
                             : "No screenshot"}
                         </div>
-                        <div className="flex space-x-1">
+                        <div className="flex items-center space-x-1">
                           <Button
                             variant="outline"
                             size="sm"
@@ -1407,12 +1475,20 @@ export function TestCaseDetailScreen({
                               e.stopPropagation();
                               handleCheckStepScore(step.id);
                             }}
-                            // disabled={!executionCompleted || !!stepScore}
+                            disabled={checkingScoreSteps.has(step.id)}
                             className="text-xs h-6 px-2"
                           >
                             <CheckCircle2 className="h-3 w-3 mr-1" />
-                            Check Score
+                            {checkingScoreSteps.has(step.id) ? "Checking..." : "Check Score"}
                           </Button>
+                          {stepScore && (
+                            <Badge
+                              variant={stepScore.score >= 0.8 ? "default" : stepScore.score >= 0.5 ? "secondary" : "destructive"}
+                              className="text-xs h-6 px-2"
+                            >
+                              {(stepScore.score * 100).toFixed(1)}%
+                            </Badge>
+                          )}
                         </div>
                       </div>
                     </CardContent>
@@ -1423,7 +1499,7 @@ export function TestCaseDetailScreen({
           )}
         </div>
 
-        <div className="border-t p-4">
+        {/* <div className="border-t p-4">
           <h3 className="font-semibold text-sm mb-2">
             Overall Expected Output
           </h3>
@@ -1459,7 +1535,7 @@ export function TestCaseDetailScreen({
               </div>
             </CardContent>
           </Card>
-        </div>
+        </div> */}
       </div>
 
       <div className="flex-1 flex flex-col">
@@ -1668,13 +1744,23 @@ export function TestCaseDetailScreen({
                       : "Generate Test Script"}
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    onClick={handleGenerateScriptByModel}
+                    disabled={isGeneratingScriptByModel}
+                  >
+                    <FileCode className="h-4 w-4 mr-2" />
+                    {isGeneratingScriptByModel
+                      ? "Generating..."
+                      : "Generate Test Script By Model"}
+                  </DropdownMenuItem>
+                  
+                  <DropdownMenuItem
                     onClick={handleGenerateAllScripts}
                     disabled={isGeneratingAllScripts || steps.length === 0}
                   >
                     <Layers className="h-4 w-4 mr-2" />
                     {isGeneratingAllScripts
                       ? "Generating All..."
-                      : "Generate All Test Scripts"}
+                      : "Generate Test Scripts with Image"}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={handleViewFullScript}
