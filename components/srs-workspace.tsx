@@ -11,7 +11,7 @@ import { TestScenarioScreen } from "@/components/test-scenario-screen"
 import { getScenariosJSONByAbsPath, validateResponse, GeneratedScenariosResponse } from "@/service/generate-test-cases"
 import { JSONViewer } from "@/components/json-viewer"
 import { TestCasesViewer } from "@/components/test-cases-viewer"
-import { createScenario, getScenariosBySrsId } from "@/service/scenario"
+import { getScenariosBySrsId } from "@/service/scenario"
 import { getSrsPreview } from "@/service/srs_document"
 import { getAllTestCases } from "@/service/testcase"
 import { getAllTestCaseSteps, getLatestScore } from "@/service/testcase-step"
@@ -161,7 +161,7 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       console.log("SRS object:", srs)
       
       // Gọi API để generate scenarios
-      const response = await getScenariosJSONByAbsPath(absPath)
+      const response = await getScenariosJSONByAbsPath(absPath, srs.id)
       
       // Validate response
       const validatedData = validateResponse(response)
@@ -175,33 +175,8 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       setGeneratedStats({ scenarios, testCases: 0 })
       setGenerationComplete(true)
       
-      // Lưu scenarios vào database ngay lập tức
-      if (validatedData.scenarios && validatedData.scenarios.length > 0 && srs?.id) {
-        const scenarios = validatedData.scenarios
-        ;(async () => {
-          let failed = 0
-          for (let i = 0; i < scenarios.length; i++) {
-            const scenario = scenarios[i]
-            try {
-              const title = scenario.Title || ""
-              const description = JSON.stringify(scenario, null, 2) // Toàn bộ nội dung scenario
-              const webUrl = ""
-              await createScenario({ srsId: srs.id, title, description, webUrl })
-            } catch (e) {
-              failed++
-              console.warn(`[SRSWorkspace] Persist scenario index ${i} failed`, e)
-            }
-          }
-          if (failed > 0) {
-            console.warn(`[SRSWorkspace] Persist scenarios: ${failed} failed / ${scenarios.length}`)
-          } else {
-            console.log(`[SRSWorkspace] Successfully saved ${scenarios.length} scenarios to database`)
-            // Cập nhật state để nút chuyển thành "View Scenarios"
-            setHasExistingScenarios(true)
-          }
-        })().catch((e) => {
-          console.warn("[SRSWorkspace] Persist scenarios unexpected error", e)
-        })
+      if (validatedData.scenarios && validatedData.scenarios.length > 0) {
+        setHasExistingScenarios(true)
       }
       
       console.log("Generated scenarios:", validatedData)
@@ -583,10 +558,17 @@ function normalizeScenarioForViewer(rawScenario: any) {
   try {
     let description: any = rawScenario?.description
     if (typeof description === "string") {
-      description = JSON.parse(description)
+      try {
+        description = JSON.parse(description)
+      } catch {
+        description = {}
+      }
     }
 
-    const normalizedDescription = description && typeof description === "object" ? description : {}
+    const normalizedDescription =
+      description && typeof description === "object" && !isPdfMetadata(description)
+        ? description
+        : {}
     const id = Number(rawScenario?.id)
     const title =
       normalizedDescription.Title ||
@@ -621,12 +603,24 @@ function normalizeScenarioForViewer(rawScenario: any) {
         normalizedDescription["Expected Result"] ||
         normalizedDescription.expectedResult ||
         normalizedDescription.expected_output ||
+        normalizedDescription.expected_output_text ||
         "",
     }
   } catch (e) {
     console.warn("Failed to normalize scenario:", e, rawScenario)
     return null
   }
+}
+
+function isPdfMetadata(value: any) {
+  return (
+    value &&
+    typeof value === "object" &&
+    ("mimeType" in value || "sizeBytes" in value || "originalName" in value) &&
+    !("Title" in value) &&
+    !("Steps" in value) &&
+    !("Expected Result" in value)
+  )
 }
 
 function Label({ children, className }: { children: React.ReactNode; className?: string }) {

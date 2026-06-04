@@ -3,6 +3,68 @@ import { getAuthHeaders } from "./auth-utils";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
 
+const hasImageFile = (data: any) =>
+  data?.stepImage instanceof File ||
+  data?.objectImage instanceof File ||
+  data?.relatedObjectImage instanceof File;
+
+const assertNoStepImageFiles = (data: any) => {
+  if (hasImageFile(data)) {
+    throw new Error(
+      "Step image upload is not supported by the current test-step API yet"
+    );
+  }
+};
+
+const buildCreateStepPayload = (data: any) => ({
+  testCaseId: String(data.testCaseId),
+  stepOrder: Number(data.stepOrder),
+  actionDescription: data.actionDescription || "",
+  inputData: data.inputData || "",
+  expectedOutput: data.expectedOutput || "",
+  scriptCode: data.scriptCode || "",
+});
+
+const buildUpdateStepPayload = (data: any) => {
+  const payload: Record<string, any> = {};
+
+  if (data.testCaseId !== undefined && data.testCaseId !== null) {
+    payload.testCaseId = String(data.testCaseId);
+  }
+  if (data.stepOrder !== undefined && data.stepOrder !== null) {
+    payload.stepOrder = Number(data.stepOrder);
+  }
+  if (data.actionDescription !== undefined && data.actionDescription !== null) {
+    payload.actionDescription = data.actionDescription;
+  }
+  if (data.inputData !== undefined && data.inputData !== null) {
+    payload.inputData = data.inputData;
+  }
+  if (data.expectedOutput !== undefined && data.expectedOutput !== null) {
+    payload.expectedOutput = data.expectedOutput;
+  }
+  if (data.scriptCode !== undefined && data.scriptCode !== null) {
+    payload.scriptCode = data.scriptCode;
+  }
+  if (data.stepType !== undefined && data.stepType !== null) {
+    payload.stepType = data.stepType;
+  }
+  if (data.scriptLanguage !== undefined && data.scriptLanguage !== null) {
+    payload.scriptLanguage = data.scriptLanguage;
+  }
+  if (data.imgUrl !== undefined && data.imgUrl !== null) {
+    payload.imgUrl = data.imgUrl;
+  }
+  if (data.objectImgUrl !== undefined && data.objectImgUrl !== null) {
+    payload.objectImgUrl = data.objectImgUrl;
+  }
+  if (data.relatedObjectImgUrl !== undefined && data.relatedObjectImgUrl !== null) {
+    payload.relatedObjectImgUrl = data.relatedObjectImgUrl;
+  }
+
+  return payload;
+};
+
 const getAllTestCaseSteps = async (testCaseId: number) => {
   try {
     const response = await axios.get(
@@ -31,54 +93,11 @@ const createNewTestCaseStep = async (data: any) => {
       );
     }
 
-    // Prepare FormData for multipart request
-    const formData = new FormData();
-    formData.append("testCaseId", data.testCaseId.toString());
-    formData.append("stepOrder", data.stepOrder.toString());
-    formData.append("actionDescription", data.actionDescription || "");
-    formData.append("inputData", data.inputData || "");
-    formData.append("expectedOutput", data.expectedOutput || "");
-    formData.append("scriptCode", data.scriptCode || "");
-
-    // Add step image file if exists and is valid
-    if (data.stepImage && data.stepImage instanceof File) {
-      if (!data.stepImage.type.startsWith("image/")) {
-        throw new Error("Selected step image file is not an image");
-      }
-      if (data.stepImage.size > 10 * 1024 * 1024) {
-        throw new Error("Step image file size must be less than 10MB");
-      }
-      formData.append("image", data.stepImage);
-    }
-
-    // Add object image file if exists and is valid
-    if (data.objectImage && data.objectImage instanceof File) {
-      if (!data.objectImage.type.startsWith("image/")) {
-        throw new Error("Selected object image file is not an image");
-      }
-      if (data.objectImage.size > 10 * 1024 * 1024) {
-        throw new Error("Object image file size must be less than 10MB");
-      }
-      formData.append("objectImage", data.objectImage);
-    }
-
-    // Add related object image file if exists and is valid
-    if (data.relatedObjectImage && data.relatedObjectImage instanceof File) {
-      if (!data.relatedObjectImage.type.startsWith("image/")) {
-        throw new Error("Selected related object image file is not an image");
-      }
-      if (data.relatedObjectImage.size > 10 * 1024 * 1024) {
-        throw new Error(
-          "Related object image file size must be less than 10MB"
-        );
-      }
-      formData.append("relatedObjectImage", data.relatedObjectImage);
-    }
+    assertNoStepImageFiles(data);
+    const payload = buildCreateStepPayload(data);
 
     console.log("Creating test case step with data:", {
-      testCaseId: data.testCaseId,
-      stepOrder: data.stepOrder,
-      actionDescription: data.actionDescription,
+      ...payload,
       hasStepImage: !!(data.stepImage && data.stepImage instanceof File),
       hasObjectImage: !!(data.objectImage && data.objectImage instanceof File),
       hasRelatedObjectImage: !!(
@@ -86,9 +105,9 @@ const createNewTestCaseStep = async (data: any) => {
       ),
     });
 
-    const response = await axios.post(`${API_BASE_URL}/test-steps`, formData, {
+    const response = await axios.post(`${API_BASE_URL}/test-steps`, payload, {
       headers: {
-        "Content-Type": "multipart/form-data",
+        "Content-Type": "application/json",
         ...getAuthHeaders(),
       },
       timeout: 30000,
@@ -120,93 +139,22 @@ const updateTestCaseStep = async (stepId: number, data: any) => {
       throw new Error("Invalid step ID");
     }
 
-    // Prepare FormData for multipart request
-    const formData = new FormData();
-
-    // Only append fields that are defined and not null
-    if (data.stepOrder !== undefined && data.stepOrder !== null) {
-      formData.append("stepOrder", data.stepOrder.toString());
-    }
-    if (
-      data.actionDescription !== undefined &&
-      data.actionDescription !== null
-    ) {
-      formData.append("actionDescription", data.actionDescription);
-    }
-    if (data.inputData !== undefined && data.inputData !== null) {
-      formData.append("inputData", data.inputData);
-    }
-    if (data.expectedOutput !== undefined && data.expectedOutput !== null) {
-      formData.append("expectedOutput", data.expectedOutput);
-    }
-    if (data.scriptCode !== undefined && data.scriptCode !== null) {
-      formData.append("scriptCode", data.scriptCode);
-    }
-
-    // ===== THÊM LOGIC XÓA ẢNH =====
-    // Nếu có flag removeStepImage = true, gửi yêu cầu xóa ảnh step
-    if (data.removeStepImage === true) {
-      formData.append("removeStepImage", "true");
-      console.log("Requesting to remove step image");
-    }
-    if (data.removeObjectImage === true) {
-      formData.append("removeObjectImage", "true");
-      console.log("Requesting to remove object image");
-    }
-    if (data.removeRelatedObjectImage === true) {
-      formData.append("removeRelatedObjectImage", "true");
-      console.log("Requesting to remove related object image");
-    }
-    // ===== KẾT THÚC LOGIC XÓA ẢNH =====
-
-    // Add step image file if exists and is valid
-    if (data.stepImage && data.stepImage instanceof File) {
-      if (!data.stepImage.type.startsWith("image/")) {
-        throw new Error("Selected step image file is not an image");
-      }
-      if (data.stepImage.size > 10 * 1024 * 1024) {
-        throw new Error("Step image file size must be less than 10MB");
-      }
-      formData.append("image", data.stepImage);
-    }
-
-    // Add object image file if exists and is valid
-    if (data.objectImage && data.objectImage instanceof File) {
-      if (!data.objectImage.type.startsWith("image/")) {
-        throw new Error("Selected object image file is not an image");
-      }
-      if (data.objectImage.size > 10 * 1024 * 1024) {
-        throw new Error("Object image file size must be less than 10MB");
-      }
-      formData.append("objectImage", data.objectImage);
-    }
-
-    // Add related object image file if exists and is valid
-    if (data.relatedObjectImage && data.relatedObjectImage instanceof File) {
-      if (!data.relatedObjectImage.type.startsWith("image/")) {
-        throw new Error("Selected related object image file is not an image");
-      }
-      if (data.relatedObjectImage.size > 10 * 1024 * 1024) {
-        throw new Error(
-          "Related object image file size must be less than 10MB"
-        );
-      }
-      formData.append("relatedObjectImage", data.relatedObjectImage);
-    }
+    assertNoStepImageFiles(data);
+    const payload = buildUpdateStepPayload(data);
 
     console.log(
       "Updating test case step:",
       stepId,
       "with fields:",
-      Object.keys(data)
+      Object.keys(payload)
     );
 
     const response = await axios.patch(
       `${API_BASE_URL}/test-steps/${stepId}`,
-      formData,
+      payload,
       {
         headers: {
-          "Content-Type": "multipart/form-data",
+          "Content-Type": "application/json",
           ...getAuthHeaders(),
         },
         timeout: 30000,
@@ -386,7 +334,7 @@ const checkScore = async (stepId: number) => {
             throw new Error('Invalid step ID');
         }
 
-        const response = await axios.post(`${API_BASE_URL}/test-execution-steps/${stepId}/check-score`, {
+        const response = await axios.post(`${API_BASE_URL}/test-execution-steps/${stepId}/check-score`, {}, {
             headers: {
                 ...getAuthHeaders(),
             },

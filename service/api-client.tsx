@@ -5,7 +5,7 @@ export const MAIN_API_BASE_URL =
   process.env.NEXT_PUBLIC_MAIN_BACKEND_URL || "http://localhost:8124/api";
 
 export const AI_API_BASE_URL =
-  process.env.NEXT_PUBLIC_AI_BACKEND_URL || "http://localhost:8130/api";
+  process.env.NEXT_PUBLIC_AI_BACKEND_URL || "http://localhost:8130";
 
 export const apiClient = axios.create({
   baseURL: MAIN_API_BASE_URL,

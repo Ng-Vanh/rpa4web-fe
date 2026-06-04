@@ -106,6 +106,21 @@ interface TestCaseDetail {
   environment_condition?: string;
 }
 
+function formatTestCaseDisplayId(testCase: any, testItem: string) {
+  const id = testCase?.id;
+  if (id !== undefined && id !== null && String(id).trim()) {
+    return `#${String(id)}`;
+  }
+
+  const slug = String(testItem || "test-case")
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/[^\w-]/g, "");
+
+  if (slug.length <= 28) return slug || "test-case";
+  return `${slug.slice(0, 18)}...${slug.slice(-7)}`;
+}
+
 export function TestCaseDetailScreen({
   onBack,
   testCase: initialTestCase,
@@ -856,8 +871,11 @@ export function TestCaseDetailScreen({
                 <h3 className="font-semibold text-sm text-muted-foreground mb-2">
                   ID:
                 </h3>
-                <p className="text-base">
-                  {editFormData.test_item.replace(/\s+/g, "_")}_001
+                <p
+                  className="text-base font-mono break-all"
+                  title={String(testCase?.id ?? editFormData.test_item)}
+                >
+                  {formatTestCaseDisplayId(testCase, editFormData.test_item)}
                 </p>
               </div>
               <div>
@@ -1204,9 +1222,14 @@ export function TestCaseDetailScreen({
                 Click a step to view screenshot
               </p>
               <div className="mt-3 space-y-1.5 text-sm text-muted-foreground">
-                <div>
+                <div className="min-w-0">
                   <span className="font-medium">ID:</span>{" "}
-                  {editFormData.test_item.replace(/\s+/g, "_")}_001
+                  <span
+                    className="font-mono break-all"
+                    title={String(testCase?.id ?? editFormData.test_item)}
+                  >
+                    {formatTestCaseDisplayId(testCase, editFormData.test_item)}
+                  </span>
                 </div>
                 <div>
                   <span className="font-medium">Test Item:</span>{" "}

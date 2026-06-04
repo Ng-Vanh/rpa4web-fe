@@ -39,8 +39,9 @@ const createTestCase = async (data: any) => {
         scenarioId: data.scenarioId,
         testItem: data.testItem,
         testClassification: data.testClassification,
-        runConfig: data.runConfig
-        // Bỏ configDetails
+        priority: data.priority,
+        status: data.status,
+        source: data.source,
     };
     
     console.log('Sending simplified payload:', payload);
@@ -65,9 +66,10 @@ const createTestCase = async (data: any) => {
 
 const generateTestCases = async (scenario: any) => {
     try {
-        const response = await axios.post(`${process.env.NEXT_PUBLIC_GEN_TC_BACKEND_URL}/gentc`, scenario, {
+        const response = await axios.post(`${API_BASE_URL}/generation/test-cases/${scenario.id}`, { scenario }, {
             headers: {
                 'Content-Type': 'application/json',
+                ...getAuthHeaders(),
             },
         });
         console.log('Generated test cases:', response.data);
@@ -88,7 +90,8 @@ const createTestCaseWithSteps = async (scenarioId: number, testCases: any[]) => 
                 scenarioId: scenarioId,
                 testItem: testCase.test_item,
                 testClassification: testCase.test_classification,
-                runConfig: null // Có thể để null hoặc thêm config mặc định
+                source: "ai",
+                status: "ready",
             };
             
             const createdTestCase = await createTestCase(testCaseData);

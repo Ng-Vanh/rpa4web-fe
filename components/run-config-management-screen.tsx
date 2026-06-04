@@ -62,7 +62,7 @@ export function RunConfigManagementScreen({ onBack, userId = 1 }: RunConfigManag
   const [llmConfig, setLlmConfig] = useState<LlmConfig | null>(null)
   const [isLlmConfigDialogOpen, setIsLlmConfigDialogOpen] = useState(false)
   const [newLlmConfig, setNewLlmConfig] = useState<LlmConfig>({
-    modelName: "gpt-3.5-turbo",
+    modelName: "",
     apiKey: "",
     userId: userId,
   })
@@ -171,14 +171,12 @@ export function RunConfigManagementScreen({ onBack, userId = 1 }: RunConfigManag
     }
   }
 
-  const handleEditLlmConfig = () => {
-    if (llmConfig) {
-      setNewLlmConfig({
-        modelName: llmConfig.modelName || "gpt-4.1-mini",
-        apiKey: llmConfig.apiKey || llmConfig.apiKeyEncrypted || "",
-        userId: userId,
-      })
-    }
+  const handleNewLlmConfig = () => {
+    setNewLlmConfig({
+      modelName: "",
+      apiKey: "",
+      userId,
+    })
     setIsLlmConfigDialogOpen(true)
   }
 
@@ -378,40 +376,27 @@ export function RunConfigManagementScreen({ onBack, userId = 1 }: RunConfigManag
             <div className="flex justify-between items-center">
               <h2 className="text-lg font-semibold">LLM Configuration</h2>
               <Dialog open={isLlmConfigDialogOpen} onOpenChange={setIsLlmConfigDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-green-600 hover:bg-green-700">
-                    <Plus className="h-4 w-4 mr-2" />
-                    {llmConfig ? "Update Config" : "Create Config"}
-                  </Button>
-                </DialogTrigger>
+                <Button className="bg-green-600 hover:bg-green-700" onClick={handleNewLlmConfig}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  New Config
+                </Button>
                 <DialogContent className="max-w-md">
                   <DialogHeader>
-                    <DialogTitle>{llmConfig ? "Update LLM Config" : "Create LLM Config"}</DialogTitle>
+                    <DialogTitle>New LLM Config</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
                     <div>
-                      <label className="text-sm font-medium">Model Name</label>
-                      <Select
+                      <label className="text-sm font-medium">model_name</label>
+                      <Input
                         value={newLlmConfig.modelName}
-                        onValueChange={(value) => setNewLlmConfig((prev) => ({ ...prev, modelName: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
-                          <SelectItem value="gpt-4.1-mini">GPT-4.1 Mini</SelectItem>
-                          <SelectItem value="gpt-4">GPT-4</SelectItem>
-                          <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
-                          <SelectItem value="claude-3-sonnet">Claude 3 Sonnet</SelectItem>
-                          <SelectItem value="claude-3-opus">Claude 3 Opus</SelectItem>
-                        </SelectContent>
-                      </Select>
+                        onChange={(e) => setNewLlmConfig((prev) => ({ ...prev, modelName: e.target.value }))}
+                        placeholder="e.g. gpt-4.1-mini, claude-3-5-sonnet"
+                      />
                     </div>
                     <div>
                       <label className="text-sm font-medium">API Key</label>
                       <Input
-                        type="password"
+                        type="text"
                         value={newLlmConfig.apiKey}
                         onChange={(e) => setNewLlmConfig((prev) => ({ ...prev, apiKey: e.target.value }))}
                         placeholder="Enter your API key"
@@ -425,7 +410,7 @@ export function RunConfigManagementScreen({ onBack, userId = 1 }: RunConfigManag
                         onClick={handleCreateOrUpdateLlmConfig} 
                         disabled={!newLlmConfig.modelName.trim() || !newLlmConfig.apiKey.trim() || isLlmConfigLoading}
                       >
-                        {isLlmConfigLoading ? "Saving..." : (llmConfig ? "Update Config" : "Create Config")}
+                        {isLlmConfigLoading ? "Saving..." : "Create Config"}
                       </Button>
                     </div>
                   </div>
@@ -443,11 +428,6 @@ export function RunConfigManagementScreen({ onBack, userId = 1 }: RunConfigManag
                       <Badge variant="outline">API Key Configured</Badge>
                     </div>
                   </div>
-                  <div className="flex space-x-2">
-                    <Button variant="outline" size="sm" onClick={handleEditLlmConfig}>
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                  </div>
                 </CardHeader>
                 <CardContent>
                   <div className="text-sm text-muted-foreground">
@@ -455,7 +435,7 @@ export function RunConfigManagementScreen({ onBack, userId = 1 }: RunConfigManag
                       <strong>Model:</strong> {llmConfig.modelName}
                     </p>
                     <p>
-                      <strong>API Key:</strong> ••••••••••••••••
+                      <strong>API Key:</strong> {maskApiKey(llmConfig.apiKey || llmConfig.apiKeyEncrypted || "")}
                     </p>
                   </div>
                 </CardContent>
@@ -596,4 +576,10 @@ function normalizeLlmConfig(config: any): LlmConfig {
     secretRef: config?.secretRef,
     userId: Number(config?.userId || 1),
   }
+}
+
+function maskApiKey(apiKey: string): string {
+  if (!apiKey) return "Not configured"
+  if (apiKey.length <= 7) return apiKey
+  return `${apiKey.slice(0, 4)}••••••${apiKey.slice(-3)}`
 }

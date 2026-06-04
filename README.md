@@ -33,7 +33,9 @@
 
 ## Service
 ### generate-test-cases.tsx: 
-- call api NEXT_PUBLIC_GEN_TC_BACKEND_URL nhận response json object
+- call Node backend `/generation/srs/:srsId/scenarios` để sinh scenario từ SRS.
+- call Node backend `/generation/test-cases/:scenarioId` để sinh test case từ scenario.
+- Node backend sẽ gọi `rpa4web-ai`; frontend không gọi trực tiếp AI service.
 - srs_document.tsx: xây thêm 1 api: /srs/upload-file để upload file srs (do code ban đầu chạy không được); VAnh chỉnh lại thành api của VAnh nhé
 
 ### srs_document.tsx: 
@@ -42,7 +44,8 @@
 ## ⚙️ Environment (.env)
 Thêm biến môi trường cho backend generate test cases:
 ```env
-NEXT_PUBLIC_GEN_TC_BACKEND_URL=http://localhost:9002/process
+NEXT_PUBLIC_MAIN_BACKEND_URL=http://localhost:8124/api
+NEXT_PUBLIC_AI_BACKEND_URL=http://localhost:8130
 
 
 npm run dev

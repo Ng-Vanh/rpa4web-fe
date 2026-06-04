@@ -79,6 +79,50 @@ interface TestCasesViewerProps {
   srsId?: number
 }
 
+function displayText(value: any, fallback = "-") {
+  if (value === null || value === undefined) return fallback
+  if (typeof value === "string") {
+    const trimmed = value.trim()
+    if (!trimmed) return fallback
+    try {
+      const parsed = JSON.parse(trimmed)
+      if (isPdfMetadata(parsed)) return fallback
+      if (typeof parsed === "string") return parsed || fallback
+      if (parsed && typeof parsed === "object") {
+        return parsed.Title || parsed.title || parsed.name || fallback
+      }
+    } catch {
+      return trimmed
+    }
+    return trimmed
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value)
+  if (Array.isArray(value)) return value.map((item) => displayText(item, "")).filter(Boolean).join(", ") || fallback
+  if (typeof value === "object") {
+    if (isPdfMetadata(value)) return fallback
+    return value.Title || value.title || value.name || fallback
+  }
+  return fallback
+}
+
+function displaySteps(value: any) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((step) => displayText(step, ""))
+    .filter(Boolean)
+}
+
+function isPdfMetadata(value: any) {
+  return (
+    value &&
+    typeof value === "object" &&
+    ("mimeType" in value || "sizeBytes" in value || "originalName" in value) &&
+    !("Title" in value) &&
+    !("Steps" in value) &&
+    !("Expected Result" in value)
+  )
+}
+
 export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const [showTestData, setShowTestData] = useState(false)
   const [isGeneratingAll, setIsGeneratingAll] = useState(false)
@@ -762,11 +806,13 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     const scenarioKey = String(scenario.id) // Sử dụng scenario.id làm key
     setIsGeneratingTC(scenarioKey)
     try {
-      const result = await generateTestCases(scenario)
-      setGeneratedTestCases(prev => ({
-        ...prev,
-        [scenarioKey]: result
-      }))
+      await generateTestCases(scenario)
+      await loadDatabaseTestCases(scenario.id)
+      setScenariosWithTestCases(prev => {
+        const next = new Set(prev)
+        next.add(scenarioKey)
+        return next
+      })
     } catch (error) {
       console.error("Error generating test cases:", error)
       alert("Có lỗi xảy ra khi tạo test cases. Vui lòng thử lại.")
@@ -1590,7 +1636,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           </div>
                         ) : (
                           <h3 className="text-lg font-semibold text-gray-900">
-                            <span className="font-mono text-blue-600">{index + 1}.</span> {scenario["Title"]} 
+                            <span className="font-mono text-blue-600">{index + 1}.</span> {displayText(scenario["Title"], `Scenario ${index + 1}`)} 
                             <span 
                               data-uc-id-click="true"
                               className={`text-sm ml-2 cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
@@ -1704,7 +1750,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           rows={2}
                         />
                       ) : (
-                        <span className="text-gray-600">{scenario.Precondition}</span>
+                        <span className="text-gray-600">{displayText(scenario.Precondition)}</span>
                       )}
                     </div>
                   </div>
@@ -1721,7 +1767,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           rows={2}
                         />
                       ) : (
-                        <span className="text-gray-600">{scenario.Postcondition ?? ""}</span>
+                        <span className="text-gray-600">{displayText(scenario.Postcondition)}</span>
                       )}
                     </div>
                   </div>
@@ -1767,8 +1813,9 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                             </Button>
                           </div>
                         ) : (
+                          displaySteps(scenario.Steps).length > 0 ? (
                           <ol className="list-decimal list-inside space-y-1">
-                            {scenario.Steps.map((step, stepIndex) => {
+                            {displaySteps(scenario.Steps).map((step, stepIndex) => {
                               const raw = typeof step === 'string' ? step : String(step)
                               // Loại bỏ số thứ tự có sẵn ở đầu chuỗi (vd: "1. ", "2) ")
                               const cleaned = raw.replace(/^\s*\d+[\.)]\s*/, '')
@@ -1779,6 +1826,9 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                               )
                             })}
                           </ol>
+                          ) : (
+                            <span className="text-gray-500">-</span>
+                          )
                         )}
                       </div>
                     </div>
@@ -1796,7 +1846,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           rows={2}
                         />
                       ) : (
-                        <span className="text-gray-600">{scenario["Expected Result"]}</span>
+                        <span className="text-gray-600">{displayText(scenario["Expected Result"])}</span>
                       )}
                     </div>
                   </div>

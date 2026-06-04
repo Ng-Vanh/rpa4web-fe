@@ -263,70 +263,39 @@ export function PDFViewerWithHighlight({
         }
 
         // Load PDF từ blob URL
-        // Với blob URL, thử dùng URL trực tiếp trước, nếu không được thì mới convert
+        // PDF.js có thể báo "Unexpected server response (0)" khi tự fetch blob URL.
+        // Fetch blob thành bytes rồi truyền qua `data` ổn định hơn.
         let pdfSource: any
         
         if (pdfUrl.startsWith('blob:')) {
           try {
-            // Thử dùng URL trực tiếp trước (nhanh hơn, ít tốn memory hơn)
-            pdfSource = { url: pdfUrl }
-            console.log(" Using blob URL directly for PDF.js")
-            
-            // Test xem URL có hoạt động không bằng cách thử load
-            const testTask = pdfjs.getDocument({
-              url: pdfUrl,
-              cMapUrl: `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjs.version || '3.11.174'}/cmaps/`,
-              cMapPacked: true,
-              verbosity: 0,
+            const response = await fetch(pdfUrl, {
+              method: 'GET',
+              headers: {
+                'Accept': 'application/pdf',
+              },
             })
             
-            // Chỉ test promise, không await để tránh block
-            testTask.promise.catch((testError: any) => {
-              console.warn("Blob URL direct load failed, will try ArrayBuffer method:", testError)
-            })
-          } catch (directError: any) {
-            console.warn("Direct blob URL failed, trying ArrayBuffer method:", directError)
-            
-            // Fallback: convert sang ArrayBuffer (chỉ khi cần thiết)
-            try {
-              const response = await fetch(pdfUrl, {
-                method: 'GET',
-                headers: {
-                  'Accept': 'application/pdf',
-                },
-              })
-              
-              if (!response.ok) {
-                throw new Error(`Không thể fetch blob URL: ${response.status} ${response.statusText}`)
-              }
-              
-              // Kiểm tra size trước khi allocate
-              const contentLength = response.headers.get('content-length')
-              if (contentLength) {
-                const sizeInMB = parseInt(contentLength) / (1024 * 1024)
-                if (sizeInMB > 100) {
-                  throw new Error(`PDF quá lớn (${sizeInMB.toFixed(2)}MB). Vui lòng sử dụng PDF nhỏ hơn.`)
-                }
-              }
-              
-              const arrayBuffer = await response.arrayBuffer()
-              
-              if (!arrayBuffer || arrayBuffer.byteLength === 0) {
-                throw new Error("Blob URL trả về dữ liệu rỗng")
-              }
-              
-              // Kiểm tra size sau khi load
-              const sizeInMB = arrayBuffer.byteLength / (1024 * 1024)
-              if (sizeInMB > 100) {
-                throw new Error(`PDF quá lớn (${sizeInMB.toFixed(2)}MB). Vui lòng sử dụng PDF nhỏ hơn.`)
-              }
-              
-              pdfSource = { data: new Uint8Array(arrayBuffer) }
-              console.log(" PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes (", sizeInMB.toFixed(2), "MB)")
-            } catch (fetchError: any) {
-              console.error("❌ Error fetching blob URL:", fetchError)
-              throw new Error(`Không thể load PDF từ blob URL: ${fetchError?.message || 'Unknown error'}`)
+            if (!response.ok) {
+              throw new Error(`Không thể fetch blob URL: ${response.status} ${response.statusText}`)
             }
+            
+            const arrayBuffer = await response.arrayBuffer()
+            
+            if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+              throw new Error("Blob URL trả về dữ liệu rỗng")
+            }
+            
+            const sizeInMB = arrayBuffer.byteLength / (1024 * 1024)
+            if (sizeInMB > 100) {
+              throw new Error(`PDF quá lớn (${sizeInMB.toFixed(2)}MB). Vui lòng sử dụng PDF nhỏ hơn.`)
+            }
+            
+            pdfSource = { data: new Uint8Array(arrayBuffer) }
+            console.log(" PDF loaded from blob as Uint8Array, size:", arrayBuffer.byteLength, "bytes (", sizeInMB.toFixed(2), "MB)")
+          } catch (fetchError: any) {
+            console.error("❌ Error fetching blob URL:", fetchError)
+            throw new Error(`Không thể load PDF từ blob URL: ${fetchError?.message || 'Unknown error'}`)
           }
         } else {
           pdfSource = { url: pdfUrl }

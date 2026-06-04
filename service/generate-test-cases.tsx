@@ -1,16 +1,15 @@
-// generate-test-cases.tsx
-// Service để gọi API generate test cases từ SRS document
+import { getAuthHeaders } from "./auth-utils";
 
-const API_URL = process.env.NEXT_PUBLIC_GEN_TC_BACKEND_URL as string;
+const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
 
-export async function getScenariosJSONByAbsPath(absPath: string) {
-  // LƯU Ý: dùng forward slash hoặc escape backslash
-  const safePath = absPath.replace(/\\/g, "/");
-
-  const res = await fetch(API_URL, {
+export async function generateScenariosForSrs(srsId: number | string, filePath?: string) {
+  const res = await fetch(`${API_BASE_URL}/generation/srs/${srsId}/scenarios`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ abs_path: absPath }),
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+    },
+    body: JSON.stringify({ filePath }),
   });
 
   if (!res.ok) {
@@ -20,6 +19,13 @@ export async function getScenariosJSONByAbsPath(absPath: string) {
 
   // Trường hợp này server trả JSON object
   return await res.json();
+}
+
+export async function getScenariosJSONByAbsPath(absPath: string, srsId?: number | string) {
+  if (!srsId) {
+    throw new Error("SRS id is required for scenario generation");
+  }
+  return generateScenariosForSrs(srsId, absPath.replace(/\\/g, "/"));
 }
 
 // Interface cho response từ API
