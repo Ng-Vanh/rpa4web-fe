@@ -27,6 +27,18 @@ const generateTestScriptByModel = async (testCaseId: number) => {
     }
 };
 
+const generateTestScriptByLLM = async (testCaseId: number) => {
+    try {
+        const response = await axios.post(`${API_BASE_URL}/gen/generate-llm/${testCaseId}`, {}, {
+            headers: getAuthHeaders()
+        });
+        return response.data;
+    } catch (error) {
+        console.error("Error generating test script By LLM:", error);
+        throw error;
+    }
+};
+
 
 
 // By Thu
@@ -55,4 +67,4 @@ const getTestScript = async (testCaseId: number) => {
     }
 };
 
-export { generateTestScript, generateTestScriptByModel, generateAllTestScripts, getTestScript };
+export { generateTestScript, generateTestScriptByModel, generateTestScriptByLLM, generateAllTestScripts, getTestScript };

@@ -52,6 +52,7 @@ import {
 import {
   generateTestScript,
   generateTestScriptByModel,
+  generateTestScriptByLLM,
   generateAllTestScripts,
   getTestScript,
 } from "@/service/gen-script";
@@ -142,6 +143,7 @@ export function TestCaseDetailScreen({
 
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
   const [isGeneratingScriptByModel, setIsGeneratingScriptByModel] = useState(false);
+  const [isGeneratingScriptByLLM, setIsGeneratingScriptByLLM] = useState(false);
   const [isGeneratingAllScripts, setIsGeneratingAllScripts] = useState(false);
 
   const [executingSteps, setExecutingSteps] = useState<Set<number>>(new Set());
@@ -625,6 +627,30 @@ export function TestCaseDetailScreen({
       alert(errorMessage);
     } finally {
       setIsGeneratingScriptByModel(false);
+    }
+  }
+
+  const handleGenerateScriptByLLM = async () => {
+    try {
+      setIsGeneratingScriptByLLM(true);
+      console.log("Generating test script by LLM for test case:", testCase.id);
+
+      const script = await generateTestScriptByLLM(testCase.id);
+      console.log("Generated script by LLM:", script);
+
+      await fetchTestCaseSteps();
+
+      setViewMode("execution");
+    } catch (error) {
+      console.error("Failed to generate test script by LLM:", error);
+
+      let errorMessage = "Failed to generate test script by LLM. Please try again.";
+      if (error instanceof Error) {
+        errorMessage = error.message;
+      }
+      alert(errorMessage);
+    } finally {
+      setIsGeneratingScriptByLLM(false);
     }
   }
 
@@ -1172,6 +1198,20 @@ export function TestCaseDetailScreen({
                   ? "Regenerate Script By Model"
                   : "Generate Script By Model"}
               </Button>
+
+              <Button
+                onClick={handleGenerateScriptByLLM}
+                disabled={isGeneratingScriptByLLM || steps.length === 0}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed"
+                size="lg"
+              >
+                <FileCode className="h-4 w-4 mr-2" />
+                {isGeneratingScriptByLLM
+                  ? "Generating..."
+                  : hasBeenGenerated
+                  ? "Regenerate Script By LLM"
+                  : "Generate Script By LLM"}
+              </Button>
             </div>
 
             <div className="text-sm text-muted-foreground space-y-2">
@@ -1196,6 +1236,14 @@ export function TestCaseDetailScreen({
                   : hasBeenGenerated
                   ? "Regenerate test scripts using AI model"
                   : "Generate test scripts using AI model"}
+              </p>
+              <p>
+                <strong>Generate By LLM:</strong>{" "}
+                {isGeneratingScriptByLLM
+                  ? "Generating test scripts by LLM..."
+                  : hasBeenGenerated
+                  ? "Regenerate test scripts using embedding top-k and LLM"
+                  : "Generate test scripts using embedding top-k and LLM"}
               </p>
             </div>
           </CardContent>
@@ -1760,8 +1808,8 @@ export function TestCaseDetailScreen({
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" disabled={isGeneratingScript || isGeneratingScriptByModel || isGeneratingAllScripts}>
-                    {(isGeneratingScript || isGeneratingScriptByModel || isGeneratingAllScripts) ? (
+                  <Button variant="outline" disabled={isGeneratingScript || isGeneratingScriptByModel || isGeneratingScriptByLLM || isGeneratingAllScripts}>
+                    {(isGeneratingScript || isGeneratingScriptByModel || isGeneratingScriptByLLM || isGeneratingAllScripts) ? (
                       <svg className="h-4 w-4 mr-2 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
@@ -1769,7 +1817,7 @@ export function TestCaseDetailScreen({
                     ) : (
                       <Code className="h-4 w-4 mr-2" />
                     )}
-                    {(isGeneratingScript || isGeneratingScriptByModel || isGeneratingAllScripts) ? "Processing..." : "Script Actions"}
+                    {(isGeneratingScript || isGeneratingScriptByModel || isGeneratingScriptByLLM || isGeneratingAllScripts) ? "Processing..." : "Script Actions"}
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56">
@@ -1790,6 +1838,15 @@ export function TestCaseDetailScreen({
                     {isGeneratingScriptByModel
                       ? "Generating..."
                       : "Generate Test Script By Model"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={handleGenerateScriptByLLM}
+                    disabled={isGeneratingScriptByLLM}
+                  >
+                    <FileCode className="h-4 w-4 mr-2" />
+                    {isGeneratingScriptByLLM
+                      ? "Generating..."
+                      : "Generate Test Script By LLM"}
                   </DropdownMenuItem>
                   
                   <DropdownMenuItem
