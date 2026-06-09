@@ -348,6 +348,17 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     })
   }
 
+  const expandAllUcGroups = () => {
+    const ucIds = Array.from(
+      new Set(scenariosState.map((s) => s.UC_id?.trim() || "Unknown")),
+    )
+    setExpandedUcGroups(new Set(ucIds))
+  }
+
+  const collapseAllUcGroups = () => {
+    setExpandedUcGroups(new Set())
+  }
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(JSON.stringify(data, null, 2))
   }
@@ -1541,6 +1552,19 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
     setExpandedUcGroups(new Set(scenariosByUcId.map((group) => group.ucId)))
   }, [data.scenarios])
 
+  const allUcGroupsExpanded = useMemo(() => {
+    if (scenariosByUcId.length === 0) return false
+    return scenariosByUcId.every(({ ucId }) => expandedUcGroups.has(ucId))
+  }, [scenariosByUcId, expandedUcGroups])
+
+  const toggleAllUcGroups = () => {
+    if (allUcGroupsExpanded) {
+      collapseAllUcGroups()
+    } else {
+      expandAllUcGroups()
+    }
+  }
+
   // Lấy danh sách tất cả UC_id để highlight (deprecated - dùng bboxes thay thế)
   // Sử dụng useMemo để tránh tạo array mới mỗi lần render, chỉ tạo lại khi scenarios thay đổi
   const allUcIds = useMemo(() => {
@@ -1570,6 +1594,24 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
           )}
           <h1 className="text-xl font-semibold">Generated Scenarios</h1>
           <div className="ml-auto flex space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleAllUcGroups}
+              disabled={scenariosByUcId.length === 0}
+            >
+              {allUcGroupsExpanded ? (
+                <>
+                  <ChevronRight className="h-4 w-4 mr-2" />
+                  Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4 mr-2" />
+                  Expand
+                </>
+              )}
+            </Button>
             <Button
               variant={isSplitView ? "default" : "outline"}
               size="sm"
@@ -1642,7 +1684,29 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
               <div key={ucId} className="space-y-3">
                 <Card className={`hover:shadow-md transition-shadow ${selectedUcId === ucId ? 'ring-2 ring-blue-500' : ''}`}>
                   <CardContent className="py-3 px-4">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          data-uc-id-click="true"
+                          className={`font-semibold cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
+                            selectedUcId === ucId
+                              ? 'text-blue-600 bg-blue-50 ring-2 ring-blue-300'
+                              : 'text-gray-900 hover:bg-gray-100'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (ucId) {
+                              handleUcIdClick(ucId, e)
+                            }
+                          }}
+                          title="Click để scroll đến phần khớp trong PDF (click nhiều lần để xem các match khác)"
+                        >
+                          {ucId}
+                        </span>
+                        <Badge variant="outline" className="text-xs">
+                          {groupScenarios.length} scenario{groupScenarios.length !== 1 ? "s" : ""}
+                        </Badge>
+                      </div>
                       <Button
                         variant="ghost"
                         size="icon"
@@ -1659,26 +1723,6 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           <ChevronRight className="h-4 w-4" />
                         )}
                       </Button>
-                      <span
-                        data-uc-id-click="true"
-                        className={`font-semibold cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
-                          selectedUcId === ucId
-                            ? 'text-blue-600 bg-blue-50 ring-2 ring-blue-300'
-                            : 'text-gray-900 hover:bg-gray-100'
-                        }`}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          if (ucId) {
-                            handleUcIdClick(ucId, e)
-                          }
-                        }}
-                        title="Click để scroll đến phần khớp trong PDF (click nhiều lần để xem các match khác)"
-                      >
-                        {ucId}
-                      </span>
-                      <Badge variant="outline" className="text-xs">
-                        {groupScenarios.length} scenario{groupScenarios.length !== 1 ? "s" : ""}
-                      </Badge>
                     </div>
                   </CardContent>
                 </Card>
