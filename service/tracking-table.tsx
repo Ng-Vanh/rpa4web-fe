@@ -32,6 +32,10 @@ function isTableHtml(value: string): boolean {
   return /<table[\s>]/i.test(value)
 }
 
+function stripHtmlExtension(name: string): string {
+  return name.replace(/\.html$/i, "")
+}
+
 function toTableContentItem(value: unknown, fallbackName: string): TableContentItem | null {
   if (typeof value === "string" && value.trim()) {
     return { name: fallbackName, content: value }
@@ -51,14 +55,15 @@ function toTableContentItem(value: unknown, fallbackName: string): TableContentI
 
   if (!content?.trim()) return null
 
-  const name =
+  const name = stripHtmlExtension(
     typeof record.filename === "string" && record.filename.trim()
       ? record.filename.trim()
       : typeof record.name === "string" && record.name.trim()
         ? record.name.trim()
         : typeof record.file === "string" && record.file.trim()
           ? record.file.trim()
-          : fallbackName
+          : fallbackName,
+  )
 
   return { name, content }
 }
