@@ -1,14 +1,11 @@
 import { apiClient } from "./api-client"
 import type { EvaluateRequestOptions } from "./tracking-heading"
 
-export interface TableOcrRequestOptions extends EvaluateRequestOptions {
-  ngrokBase?: string
-}
+export type TableOcrRequestOptions = EvaluateRequestOptions
 
 export async function processTrackingTable(srsId: number, options: TableOcrRequestOptions = {}) {
   const response = await apiClient.post(`/generation/srs/${srsId}/evaluate/table-ocr`, {
     useCache: options.useCache ?? true,
-    ngrokBase: options.ngrokBase,
   })
   return response.data
 }
