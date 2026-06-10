@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { ArrowLeft, FileText, Calendar, User, ExternalLink, Play, History, Eye, Info } from "lucide-react"
+import { ArrowLeft, FileText, Calendar, User, ExternalLink, Play, History, Eye, Info, ClipboardCheck, Loader2 } from "lucide-react"
 import { TestScenarioScreen } from "@/components/test-scenario-screen"
 import { getScenariosJSONByAbsPath, validateResponse, GeneratedScenariosResponse } from "@/service/generate-test-cases"
 import { JSONViewer } from "@/components/json-viewer"
@@ -15,6 +15,11 @@ import { getScenariosBySrsId } from "@/service/scenario"
 import { getSrsPreview } from "@/service/srs_document"
 import { getAllTestCases } from "@/service/testcase"
 import { getAllTestCaseSteps, getLatestScore } from "@/service/testcase-step"
+import { HeadingEvaluatePanel } from "@/components/heading-evaluate-panel"
+import { UsecaseEvaluatePanel } from "@/components/usecase-evaluate-panel"
+import { processTrackingHeading } from "@/service/tracking-heading"
+import { extractTableContentItems, processTrackingTable } from "@/service/tracking-table"
+import { getUsecaseAnalyses, processTrackingUsecase } from "@/service/tracking-usecase"
 
 interface SRSWorkspaceProps {
   srs: any
@@ -22,7 +27,8 @@ interface SRSWorkspaceProps {
 }
 
 export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
-  const [currentView, setCurrentView] = useState<"workspace" | "scenarios" | "json-viewer" | "scenario-viewer">("workspace")
+  const [currentView, setCurrentView] = useState<"workspace" | "scenarios" | "json-viewer" | "scenario-viewer" | "evaluate">("workspace")
+  const [evaluateTab, setEvaluateTab] = useState<"heading" | "table" | "usecase">("heading")
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationComplete, setGenerationComplete] = useState(false)
   const [generatedStats, setGeneratedStats] = useState({ scenarios: 0, testCases: 0 })
@@ -39,6 +45,20 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
     stepsWithHighScore: number
   } | null>(null)
   const [reportLoading, setReportLoading] = useState(false)
+  const [headingLoading, setHeadingLoading] = useState(false)
+  const [headingError, setHeadingError] = useState<string | null>(null)
+  const [headingData, setHeadingData] = useState<unknown>(null)
+  const [headingPdfUrl, setHeadingPdfUrl] = useState<string | null>(null)
+  const [headingPdfLoading, setHeadingPdfLoading] = useState(false)
+  const [selectedHeadingKey, setSelectedHeadingKey] = useState<string | null>(null)
+  const [headingTitleMatchIndex, setHeadingTitleMatchIndex] = useState(0)
+  const [shouldScrollHeadingPdf, setShouldScrollHeadingPdf] = useState(false)
+  const [tableLoading, setTableLoading] = useState(false)
+  const [tableError, setTableError] = useState<string | null>(null)
+  const [tableData, setTableData] = useState<unknown>(null)
+  const [usecaseLoading, setUsecaseLoading] = useState(false)
+  const [usecaseError, setUsecaseError] = useState<string | null>(null)
+  const [usecaseData, setUsecaseData] = useState<unknown>(null)
   const uploadedByLabel =
     typeof srs?.uploadedBy === "object" && srs?.uploadedBy?.username
       ? srs.uploadedBy.username
@@ -74,12 +94,357 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
     return () => { cancelled = true }
   }, [srs?.id])
 
+  useEffect(() => {
+    return () => {
+      if (headingPdfUrl && headingPdfUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(headingPdfUrl)
+      }
+    }
+  }, [headingPdfUrl])
+
   const handleViewScenariosManagement = () => {
     setCurrentView("scenarios")
   }
 
   const handleBackToWorkspace = () => {
     setCurrentView("workspace")
+  }
+
+  const handleOpenEvaluate = () => {
+    setEvaluateTab("heading")
+    setHeadingError(null)
+    setCurrentView("evaluate")
+  }
+
+  const loadHeadingPdf = async (force = false) => {
+    if (!srs?.id) return
+    if (!force && headingPdfUrl) return
+
+    setHeadingPdfLoading(true)
+    try {
+      if (headingPdfUrl && headingPdfUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(headingPdfUrl)
+      }
+
+      const blob = await getSrsPreview(srs.id)
+      if (!blob || blob.size === 0) {
+        throw new Error("PDF blob rỗng hoặc không hợp lệ")
+      }
+
+      setHeadingPdfUrl(URL.createObjectURL(blob))
+    } catch (error: any) {
+      console.error("Error loading heading PDF:", error)
+      setHeadingPdfUrl(null)
+    } finally {
+      setHeadingPdfLoading(false)
+    }
+  }
+
+  const handleRunEvaluateTab = async (tabId: "heading" | "table" | "usecase") => {
+    if (!srs?.id) {
+      const message = "Không tìm thấy SRS ID để đánh giá"
+      if (tabId === "heading") setHeadingError(message)
+      if (tabId === "table") setTableError(message)
+      if (tabId === "usecase") setUsecaseError(message)
+      return
+    }
+
+    if (tabId === "heading") {
+      setEvaluateTab("heading")
+      setHeadingLoading(true)
+      setHeadingError(null)
+      setSelectedHeadingKey(null)
+      setHeadingTitleMatchIndex(0)
+
+      try {
+        const response = await processTrackingHeading(srs.id)
+        setHeadingData(response)
+        void loadHeadingPdf()
+      } catch (error: any) {
+        console.error("Error processing heading:", error)
+        setHeadingError(error?.message || "Không thể xử lý heading")
+        setHeadingData(null)
+      } finally {
+        setHeadingLoading(false)
+      }
+      return
+    }
+
+    if (tabId === "table") {
+      setEvaluateTab("table")
+      setTableLoading(true)
+      setTableError(null)
+
+      try {
+        const response = await processTrackingTable(srs.id)
+        setTableData(response)
+      } catch (error: any) {
+        console.error("Error processing table:", error)
+        setTableError(error?.message || "Không thể xử lý table")
+        setTableData(null)
+      } finally {
+        setTableLoading(false)
+      }
+      return
+    }
+
+    if (tabId === "usecase") {
+      setEvaluateTab("usecase")
+      setUsecaseLoading(true)
+      setUsecaseError(null)
+
+      try {
+        const response = await processTrackingUsecase(srs.id)
+        setUsecaseData(response)
+      } catch (error: any) {
+        console.error("Error processing usecase:", error)
+        setUsecaseError(error?.message || "Không thể xử lý usecase")
+        setUsecaseData(null)
+      } finally {
+        setUsecaseLoading(false)
+      }
+    }
+  }
+
+  const handleHeadingClick = (headingKey: string) => {
+    setHeadingTitleMatchIndex((prev) =>
+      selectedHeadingKey === headingKey ? prev + 1 : 0,
+    )
+    setSelectedHeadingKey(headingKey)
+    setShouldScrollHeadingPdf(true)
+    setTimeout(() => setShouldScrollHeadingPdf(false), 1500)
+  }
+
+  const withTableBorders = (html: string) => {
+    if (!html) return ""
+    const bodyHtml = html
+      .replace(/<table\b([^>]*)>/gi, "<table $1>")
+      .replace(/<th\b([^>]*)>/gi, "<th $1>")
+      .replace(/<td\b([^>]*)>/gi, "<td $1>")
+      .replace(/<tr\b([^>]*)>/gi, "<tr $1>")
+      .replace(/<td\b([^>]*)>\s*<\/td>/gi, '<td $1 class="cell-empty"></td>')
+      .replace(/<th\b([^>]*)>\s*<\/th>/gi, '<th $1 class="cell-empty"></th>')
+
+    return `
+      <style>
+        .analysis-table table,
+        .analysis-table tr,
+        .analysis-table th,
+        .analysis-table td {
+          border: 1px solid #000 !important;
+        }
+        .analysis-table table {
+          width: 100% !important;
+          border-collapse: collapse !important;
+          border-spacing: 0 !important;
+        }
+        .analysis-table th,
+        .analysis-table td {
+          padding: 8px !important;
+          vertical-align: top !important;
+        }
+        .analysis-table td.cell-empty,
+        .analysis-table th.cell-empty {
+          background: #fee2e2 !important;
+        }
+      </style>
+      <div class="analysis-table">${bodyHtml}</div>
+    `
+  }
+
+  const evaluateTabs = [
+    { id: "heading" as const, label: "Heading" },
+    { id: "table" as const, label: "Table" },
+    { id: "usecase" as const, label: "Usecase" },
+  ]
+
+  const renderUsecaseContent = () => {
+    if (usecaseLoading) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="flex flex-col items-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Đang xử lý usecase...</p>
+          </div>
+        </div>
+      )
+    }
+
+    if (usecaseError) {
+      return (
+        <div className="p-6">
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6 text-red-800 text-sm">{usecaseError}</CardContent>
+          </Card>
+        </div>
+      )
+    }
+
+    if (usecaseData == null) {
+      return (
+        <div className="p-6">
+          <p className="text-sm text-muted-foreground">
+            Nhấn nút thực thi bên cạnh tab Usecase để phân tích use case từ tài liệu SRS.
+          </p>
+        </div>
+      )
+    }
+
+    const analyses = getUsecaseAnalyses(usecaseData)
+    if (analyses.length > 0) {
+      return <UsecaseEvaluatePanel analyses={analyses} />
+    }
+
+    if (typeof usecaseData === "string") {
+      return (
+        <div className="p-6">
+          <pre className="text-sm bg-muted p-4 rounded overflow-auto whitespace-pre-wrap">{usecaseData}</pre>
+        </div>
+      )
+    }
+
+    return (
+      <div className="p-6">
+        <pre className="text-sm bg-muted p-4 rounded overflow-auto whitespace-pre-wrap">
+          {JSON.stringify(usecaseData, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+
+  const renderTableContent = () => {
+    if (tableLoading) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="flex flex-col items-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Đang xử lý table...</p>
+          </div>
+        </div>
+      )
+    }
+
+    if (tableError) {
+      return (
+        <div className="p-6">
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6 text-red-800 text-sm">{tableError}</CardContent>
+          </Card>
+        </div>
+      )
+    }
+
+    if (tableData == null) {
+      return (
+        <div className="p-6">
+          <p className="text-sm text-muted-foreground">
+            Nhấn nút thực thi bên cạnh tab Table để phân tích bảng từ tài liệu SRS.
+          </p>
+        </div>
+      )
+    }
+
+    const tableItems = extractTableContentItems(tableData)
+    if (tableItems.length > 0) {
+      return (
+        <div className="space-y-4 p-6">
+          {tableItems.map((file, index) => (
+            <Card key={`${file.name}-${index}`}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base font-mono">{file.name}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div
+                  className="text-sm bg-white p-3 rounded overflow-auto [&_table]:border [&_table]:border-black [&_table]:border-collapse [&_th]:border [&_th]:border-black [&_th]:p-2 [&_td]:border [&_td]:border-black [&_td]:p-2"
+                  dangerouslySetInnerHTML={{ __html: withTableBorders(file.content) }}
+                />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )
+    }
+
+    if (typeof tableData === "string") {
+      return (
+        <div className="p-6">
+          <pre className="text-sm bg-muted p-4 rounded overflow-auto whitespace-pre-wrap">{tableData}</pre>
+        </div>
+      )
+    }
+
+    return (
+      <div className="p-6">
+        <pre className="text-sm bg-muted p-4 rounded overflow-auto whitespace-pre-wrap">
+          {JSON.stringify(tableData, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+
+  const renderHeadingContent = () => {
+    if (headingLoading) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <div className="flex flex-col items-center space-y-4">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Đang xử lý heading...</p>
+          </div>
+        </div>
+      )
+    }
+
+    if (headingError) {
+      return (
+        <div className="p-6">
+          <Card className="border-red-200 bg-red-50">
+            <CardContent className="pt-6 text-red-800 text-sm">{headingError}</CardContent>
+          </Card>
+        </div>
+      )
+    }
+
+    if (headingData == null) {
+      return (
+        <div className="p-6">
+          <p className="text-sm text-muted-foreground">
+            Nhấn nút thực thi bên cạnh tab Heading để phân tích tài liệu SRS.
+          </p>
+        </div>
+      )
+    }
+
+    if (typeof headingData === "string") {
+      return (
+        <div className="p-6">
+          <pre className="text-sm bg-muted p-4 rounded overflow-auto whitespace-pre-wrap">{headingData}</pre>
+        </div>
+      )
+    }
+
+    return (
+      <HeadingEvaluatePanel
+        headingData={headingData}
+        pdfUrl={headingPdfUrl}
+        pdfLoading={headingPdfLoading}
+        selectedHeadingKey={selectedHeadingKey}
+        titleMatchIndex={headingTitleMatchIndex}
+        shouldScrollPdf={shouldScrollHeadingPdf}
+        onHeadingClick={handleHeadingClick}
+        onRetryLoadPdf={() => void loadHeadingPdf(true)}
+      />
+    )
+  }
+
+  const renderEvaluateTabContent = () => {
+    switch (evaluateTab) {
+      case "heading":
+        return renderHeadingContent()
+      case "table":
+        return renderTableContent()
+      case "usecase":
+        return renderUsecaseContent()
+    }
   }
 
   const handleViewJSON = () => {
@@ -308,6 +673,78 @@ Generated by RPA4Web Testing Tool
     return <TestCasesViewer data={generatedData} onBack={handleBackToWorkspace} srsId={srs.id} />
   }
 
+  if (currentView === "evaluate") {
+    return (
+      <div className="h-screen bg-background flex flex-col overflow-hidden">
+        <nav className="border-b bg-card flex-shrink-0">
+          <div className="flex h-16 items-center px-6">
+            <Button variant="ghost" onClick={handleBackToWorkspace} className="mr-4">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Workspace
+            </Button>
+            <h1 className="text-xl font-semibold">Evaluate - {srs.name}</h1>
+          </div>
+        </nav>
+
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className="w-40 h-full border-r bg-slate-50 flex flex-col flex-shrink-0">
+            <div className="px-3 py-2 border-b">
+              <h2 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Tabs</h2>
+            </div>
+            <div className="flex-1 overflow-y-auto p-1.5">
+              {evaluateTabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`flex items-center justify-between rounded-md px-2 py-1.5 mb-0.5 ${
+                    evaluateTab === tab.id ? "bg-primary/10 text-primary" : "hover:bg-muted"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setEvaluateTab(tab.id)}
+                    className="flex-1 min-w-0 text-left text-xs font-medium truncate"
+                  >
+                    {tab.label}
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 flex-shrink-0"
+                    disabled={
+                      (tab.id === "heading" && headingLoading) ||
+                      (tab.id === "table" && tableLoading) ||
+                      (tab.id === "usecase" && usecaseLoading)
+                    }
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      void handleRunEvaluateTab(tab.id)
+                    }}
+                    title={`Run ${tab.label}`}
+                  >
+                    <Play className="h-3 w-3 fill-current" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div
+            className={`flex-1 h-full bg-white ${
+              evaluateTab === "heading" && headingData != null && typeof headingData !== "string"
+                ? "overflow-hidden"
+                : evaluateTab === "usecase" && getUsecaseAnalyses(usecaseData).length > 0
+                  ? "overflow-y-auto"
+                  : "overflow-y-auto p-6"
+            }`}
+          >
+            {renderEvaluateTabContent()}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <nav className="border-b bg-card">
@@ -408,6 +845,20 @@ Generated by RPA4Web Testing Tool
           </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={handleOpenEvaluate}>
+              <CardContent className="p-6">
+                <div className="flex items-center space-x-3 mb-3">
+                  <div className="p-2 bg-amber-100 rounded-lg">
+                    <ClipboardCheck className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <h3 className="font-semibold">Evaluate</h3>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Đánh giá tài liệu SRS theo Heading, Table và Usecase
+                </p>
+              </CardContent>
+            </Card>
+
             <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={hasExistingScenarios ? handleViewScenarios : handleGenerateScenarios}>
               <CardContent className="p-6">
                 <div className="flex items-center space-x-3 mb-3">

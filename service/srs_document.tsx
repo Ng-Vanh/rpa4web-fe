@@ -173,27 +173,61 @@ export {
   getCurrentUser
 };
 
-// Lấy preview PDF (byte stream) cho SRS
-export const getSrsPreview = async (srsId: number, rangeHeader?: string) => {
-  const baseAuth = getAuthHeaders();
+const parseBlobError = async (blob: Blob, status: number): Promise<string> => {
+  try {
+    const text = await blob.text();
+    const parsed = JSON.parse(text) as { message?: string | string[] };
+    if (Array.isArray(parsed.message)) return parsed.message.join(', ');
+    if (parsed.message) return parsed.message;
+    return text || `HTTP ${status}`;
+  } catch {
+    return `HTTP ${status}`;
+  }
+};
+
+const normalizePdfBlob = (blob: Blob): Blob => {
+  if (blob.type === 'application/pdf') return blob;
+  return new Blob([blob], { type: 'application/pdf' });
+};
+
+// Lấy preview PDF (byte stream) cho SRS.
+// Dùng /document thay vì /preview để tránh ad blocker chặn URL chứa "preview".
+export const getSrsPreview = async (srsId: number | string, rangeHeader?: string) => {
   const headers: Record<string, string> = {
     Accept: 'application/pdf',
   };
-  if (baseAuth && (baseAuth as any).Authorization) {
-    headers['Authorization'] = (baseAuth as any).Authorization as string;
+  if (rangeHeader) headers['Range'] = rangeHeader;
+
+  try {
+    const response = await apiClient.get(`/srs/${srsId}/document`, {
+      headers,
+      responseType: 'blob',
+      timeout: 60000,
+      withCredentials: true,
+    });
+
+    const blob = response.data as Blob;
+    if (!blob || blob.size === 0) {
+      throw new Error('PDF preview rỗng hoặc không hợp lệ');
+    }
+
+    if (blob.type.includes('json')) {
+      throw new Error(await parseBlobError(blob, response.status));
+    }
+
+    return normalizePdfBlob(blob);
+  } catch (error: any) {
+    const status = error.response?.status;
+    const data = error.response?.data;
+
+    if (data instanceof Blob) {
+      throw new Error(await parseBlobError(data, status || 0));
+    }
+
+    if (error.response?.data?.message) {
+      throw new Error(error.response.data.message);
+    }
+
+    throw new Error(error.message || 'Không tải được preview PDF');
   }
-  if (rangeHeader) headers['Range'] = rangeHeader; // ví dụ: 'bytes=0-1048575'
-
-  const response = await axios.get(`${API_BASE_URL}/srs/${srsId}/preview`, {
-    headers,
-    responseType: 'blob', // nhận về blob (PDF)
-    validateStatus: () => true,
-    timeout: 10000, // 10 seconds timeout
-  });
-
-  if (response.status === 200 || response.status === 206) {
-    return response.data as Blob; // PDF blob
-  }
-
-  throw new Error(typeof response.data === 'string' ? response.data : `HTTP ${response.status}`);
 };

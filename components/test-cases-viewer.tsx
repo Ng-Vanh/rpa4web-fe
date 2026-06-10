@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check, Plus, Split, FileText } from "lucide-react"
+import { ArrowLeft, Play, Eye, EyeOff, Copy, Download, Edit3, Save, X, Trash2, Loader2, Check, Plus, Split, FileText, ChevronDown, ChevronRight } from "lucide-react"
 import { generateTestCases, createTestCaseWithSteps, getTestCasesWithSteps, updateTestCase, deleteTestCase } from "@/service/testcase"
 import { updateTestCaseStep, deleteTestCaseStep, createNewTestCaseStep } from "@/service/testcase-step"
 import { getAuthHeaders } from "@/service/auth-utils"
@@ -128,6 +128,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
   const [isGeneratingAll, setIsGeneratingAll] = useState(false)
   const [generatingProgress, setGeneratingProgress] = useState({ current: 0, total: 0 })
   const [expandedCases, setExpandedCases] = useState<Set<string>>(new Set())
+  const [expandedUcGroups, setExpandedUcGroups] = useState<Set<string>>(new Set())
   const [editingScenario, setEditingScenario] = useState<number | null>(null)
   const [editedScenarios, setEditedScenarios] = useState<Record<number, Scenario>>({})
   const [isSaving, setIsSaving] = useState(false)
@@ -333,6 +334,29 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       newExpanded.add(scenarioKey)
     }
     setExpandedCases(newExpanded)
+  }
+
+  const toggleUcGroup = (ucId: string) => {
+    setExpandedUcGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(ucId)) {
+        next.delete(ucId)
+      } else {
+        next.add(ucId)
+      }
+      return next
+    })
+  }
+
+  const expandAllUcGroups = () => {
+    const ucIds = Array.from(
+      new Set(scenariosState.map((s) => s.UC_id?.trim() || "Unknown")),
+    )
+    setExpandedUcGroups(new Set(ucIds))
+  }
+
+  const collapseAllUcGroups = () => {
+    setExpandedUcGroups(new Set())
   }
 
   const copyToClipboard = () => {
@@ -1505,6 +1529,42 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
 
   const scenarios = scenariosState
 
+  const scenariosByUcId = useMemo(() => {
+    const order: string[] = []
+    const grouped = new Map<string, Scenario[]>()
+
+    for (const scenario of scenarios) {
+      const ucId = scenario.UC_id?.trim() || "Unknown"
+      if (!grouped.has(ucId)) {
+        grouped.set(ucId, [])
+        order.push(ucId)
+      }
+      grouped.get(ucId)!.push(scenario)
+    }
+
+    return order.map((ucId) => ({
+      ucId,
+      scenarios: grouped.get(ucId) ?? [],
+    }))
+  }, [scenarios])
+
+  useEffect(() => {
+    setExpandedUcGroups(new Set(scenariosByUcId.map((group) => group.ucId)))
+  }, [data.scenarios])
+
+  const allUcGroupsExpanded = useMemo(() => {
+    if (scenariosByUcId.length === 0) return false
+    return scenariosByUcId.every(({ ucId }) => expandedUcGroups.has(ucId))
+  }, [scenariosByUcId, expandedUcGroups])
+
+  const toggleAllUcGroups = () => {
+    if (allUcGroupsExpanded) {
+      collapseAllUcGroups()
+    } else {
+      expandAllUcGroups()
+    }
+  }
+
   // Lấy danh sách tất cả UC_id để highlight (deprecated - dùng bboxes thay thế)
   // Sử dụng useMemo để tránh tạo array mới mỗi lần render, chỉ tạo lại khi scenarios thay đổi
   const allUcIds = useMemo(() => {
@@ -1534,6 +1594,24 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
           )}
           <h1 className="text-xl font-semibold">Generated Scenarios</h1>
           <div className="ml-auto flex space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleAllUcGroups}
+              disabled={scenariosByUcId.length === 0}
+            >
+              {allUcGroupsExpanded ? (
+                <>
+                  <ChevronRight className="h-4 w-4 mr-2" />
+                  Collapse
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-4 w-4 mr-2" />
+                  Expand
+                </>
+              )}
+            </Button>
             <Button
               variant={isSplitView ? "default" : "outline"}
               size="sm"
@@ -1599,7 +1677,57 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
         </div>
 
         <div className="space-y-6">
-          {scenarios.map((scenario, index) => {
+          {scenariosByUcId.map(({ ucId, scenarios: groupScenarios }) => {
+            const isUcExpanded = expandedUcGroups.has(ucId)
+
+            return (
+              <div key={ucId} className="space-y-3">
+                <Card className={`hover:shadow-md transition-shadow ${selectedUcId === ucId ? 'ring-2 ring-blue-500' : ''}`}>
+                  <CardContent className="py-3 px-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          data-uc-id-click="true"
+                          className={`font-semibold cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
+                            selectedUcId === ucId
+                              ? 'text-blue-600 bg-blue-50 ring-2 ring-blue-300'
+                              : 'text-gray-900 hover:bg-gray-100'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            if (ucId) {
+                              handleUcIdClick(ucId, e)
+                            }
+                          }}
+                          title="Click để scroll đến phần khớp trong PDF (click nhiều lần để xem các match khác)"
+                        >
+                          {ucId}
+                        </span>
+                        <Badge variant="outline" className="text-xs">
+                          {groupScenarios.length} scenario{groupScenarios.length !== 1 ? "s" : ""}
+                        </Badge>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 flex-shrink-0"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleUcGroup(ucId)
+                        }}
+                        title={isUcExpanded ? "Thu gọn scenarios" : "Mở rộng scenarios"}
+                      >
+                        {isUcExpanded ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {isUcExpanded && groupScenarios.map((scenario, index) => {
             const isExpanded = scenario.id ? expandedCases.has(String(scenario.id)) : false
             const isEditing = editingScenario === scenario.id
             const editedScenario = scenario.id ? editedScenarios[scenario.id] || scenario : scenario
@@ -1608,10 +1736,10 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
               <Card 
                 key={scenario.id ?? scenario.S_id} 
                 id={`scenario-${scenario.id}`}
-                className={`hover:shadow-md transition-shadow ${selectedUcId === scenario.UC_id ? 'ring-2 ring-blue-500' : ''}`}
+                className="hover:shadow-md transition-shadow ml-4 border-l-4 border-l-blue-200"
               >
                 <CardContent className="p-6">
-                  {/* Header với S_id: Title (UC_id: "") */}
+                  {/* Header: Title */}
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1">
                       <div className="flex items-center space-x-3 mb-2">
@@ -1636,24 +1764,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                           </div>
                         ) : (
                           <h3 className="text-lg font-semibold text-gray-900">
-                            <span className="font-mono text-blue-600">{index + 1}.</span> {displayText(scenario["Title"], `Scenario ${index + 1}`)} 
-                            <span 
-                              data-uc-id-click="true"
-                              className={`text-sm ml-2 cursor-pointer hover:text-blue-600 transition-colors px-2 py-1 rounded ${
-                                selectedUcId === scenario.UC_id 
-                                  ? 'text-blue-600 font-bold bg-blue-50 ring-2 ring-blue-300' 
-                                  : 'text-gray-500 hover:bg-gray-100'
-                              }`}
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                if (scenario.UC_id) {
-                                  handleUcIdClick(scenario.UC_id, e)
-                                }
-                              }}
-                              title="Click để scroll đến phần khớp trong PDF (click nhiều lần để xem các match khác)"
-                            >
-                              ({scenario.UC_id})
-                            </span>
+                            <span className="font-mono text-blue-600">{index + 1}.</span> {displayText(scenario["Title"], `Scenario ${index + 1}`)}
                           </h3>
                         )}
                       </div>
@@ -2376,11 +2487,14 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
                   )} */}
 
                   {/* Divider */}
-                  {index < scenarios.length - 1 && (
+                  {index < groupScenarios.length - 1 && (
                     <hr className="border-gray-200 mt-4" />
                   )}
                 </CardContent>
               </Card>
+            )
+          })}
+              </div>
             )
           })}
         </div>
