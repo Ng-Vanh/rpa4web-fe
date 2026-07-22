@@ -681,6 +681,7 @@ export function TestCaseDetailScreen({
   const handleViewFullScript = async () => {
     try {
       setScriptError("");
+      setFullScript("");
       const script = await getTestScript(testCase.id);
       if (script) {
         setFullScript(script);
@@ -696,7 +697,7 @@ export function TestCaseDetailScreen({
       let errorMessage =
         "Please run 'Generate All Test Scripts' to generate the script first.";
       if (error instanceof Error) {
-        errorMessage = `Error: ${error.message}. Please run 'Generate All Test Scripts'.`;
+        errorMessage = error.message;
       }
       setScriptError(errorMessage);
       setIsScriptModalOpen(true);
@@ -1898,7 +1899,7 @@ export function TestCaseDetailScreen({
               <p className="text-sm text-muted-foreground">
                 {fullScript
                   ? "Below is the complete generated test script."
-                  : scriptError || "No script available."}
+                  : "No generated script is available."}
               </p>
             </CardHeader>
             <CardContent className="flex-1 overflow-hidden flex flex-col">

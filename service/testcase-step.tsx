@@ -1,7 +1,8 @@
 import axios from "axios";
 import { getAuthHeaders } from "./auth-utils";
+import { MAIN_API_BASE_URL } from "./api-client";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
+const API_BASE_URL = MAIN_API_BASE_URL.replace(/\/$/, "");
 
 const hasImageFile = (data: any) =>
   data?.stepImage instanceof File ||

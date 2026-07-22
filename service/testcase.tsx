@@ -1,7 +1,34 @@
 import axios from "axios";
 import { getAuthHeaders } from "./auth-utils";
 import { createNewTestCaseStep, getAllTestCaseSteps } from "./testcase-step";
-const API_BASE_URL = process.env.NEXT_PUBLIC_MAIN_BACKEND_URL;
+import { MAIN_API_BASE_URL } from "./api-client";
+
+const API_BASE_URL = MAIN_API_BASE_URL.replace(/\/$/, "");
+
+function scenarioGenerationError(error: unknown): Error {
+    if (!axios.isAxiosError(error)) {
+        return error instanceof Error ? error : new Error("Failed to generate test cases");
+    }
+
+    const status = error.response?.status;
+    const data = error.response?.data;
+    let detail: string | undefined;
+
+    if (typeof data === "string") {
+        detail = /^\s*<!doctype html/i.test(data)
+            ? "Server returned an HTML page instead of an API response"
+            : data.slice(0, 300);
+    } else if (Array.isArray(data?.message)) {
+        detail = data.message.join(", ");
+    } else if (typeof data?.message === "string") {
+        detail = data.message;
+    } else if (typeof data?.error === "string") {
+        detail = data.error;
+    }
+
+    const statusText = status ? ` (HTTP ${status})` : "";
+    return new Error(`Test case generation failed${statusText}${detail ? `: ${detail}` : ""}`);
+}
 
 const getAllTestCases = async (scenario_id:number ) => {
     try{
@@ -65,8 +92,13 @@ const createTestCase = async (data: any) => {
 }
 
 const generateTestCases = async (scenario: any) => {
+    const scenarioId = Number(scenario?.id);
+    if (!Number.isSafeInteger(scenarioId) || scenarioId <= 0) {
+        throw new Error("A valid scenario id is required to generate test cases");
+    }
+
     try {
-        const response = await axios.post(`${API_BASE_URL}/generation/test-cases/${scenario.id}`, { scenario }, {
+        const response = await axios.post(`${API_BASE_URL}/generation/test-cases/${scenarioId}`, { scenario }, {
             headers: {
                 'Content-Type': 'application/json',
                 ...getAuthHeaders(),
@@ -76,7 +108,7 @@ const generateTestCases = async (scenario: any) => {
         return response.data;
     } catch (error) {
         console.error("Error generating test cases:", error);
-        throw error;
+        throw scenarioGenerationError(error);
     }
 }
 

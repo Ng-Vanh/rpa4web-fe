@@ -12,6 +12,7 @@ import { updateTestCaseStep, deleteTestCaseStep, createNewTestCaseStep } from "@
 import { getAuthHeaders } from "@/service/auth-utils"
 import { getSrsPreview } from "@/service/srs_document"
 import { PDFViewerWithHighlight } from "@/components/pdf-viewer-with-highlight"
+import { MAIN_API_BASE_URL } from "@/service/api-client"
 
 interface Scenario {
   UC_id: string
@@ -79,7 +80,7 @@ interface TestCasesViewerProps {
   srsId?: number
 }
 
-function displayText(value: any, fallback = "-") {
+function displayText(value: any, fallback = "-"): string {
   if (value === null || value === undefined) return fallback
   if (typeof value === "string") {
     const trimmed = value.trim()
@@ -105,7 +106,7 @@ function displayText(value: any, fallback = "-") {
   return fallback
 }
 
-function displaySteps(value: any) {
+function displaySteps(value: any): string[] {
   if (!Array.isArray(value)) return []
   return value
     .map((step) => displayText(step, ""))
@@ -520,7 +521,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       let response
       if (isNewScenario) {
         // Tạo scenario mới
-        response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios`, {
+        response = await fetch(`${MAIN_API_BASE_URL}/scenarios`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -535,7 +536,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
         })
       } else {
         // Cập nhật scenario hiện có
-        response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/${editedScenario.id}`, {
+        response = await fetch(`${MAIN_API_BASE_URL}/scenarios/${editedScenario.id}`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -703,7 +704,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
 
       // Bước 3: Xóa scenario
       const authHeaders = getAuthHeaders()
-      const response = await fetch(`${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/${scenario.id}`, {
+      const response = await fetch(`${MAIN_API_BASE_URL}/scenarios/${scenario.id}`, {
         method: 'DELETE',
         headers: {
           'Content-Type': 'application/json',
@@ -839,7 +840,7 @@ export function TestCasesViewer({ data, onBack, srsId }: TestCasesViewerProps) {
       })
     } catch (error) {
       console.error("Error generating test cases:", error)
-      alert("Có lỗi xảy ra khi tạo test cases. Vui lòng thử lại.")
+      alert(error instanceof Error ? error.message : "Có lỗi xảy ra khi tạo test cases. Vui lòng thử lại.")
     } finally {
       setIsGeneratingTC(null)
     }

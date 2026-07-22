@@ -1,54 +1,47 @@
-# Dependencies stage
-FROM node:18-alpine AS deps
+FROM node:20-alpine AS dependencies
+
 WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
 
-# Install dependencies based on the preferred package manager
-COPY package.json pnpm-lock.yaml* ./
-RUN corepack enable pnpm && \
-    pnpm install --frozen-lockfile
+FROM dependencies AS development
 
-# Builder stage
-FROM node:18-alpine AS builder
-WORKDIR /app
-
-# Copy dependencies from deps stage
-COPY --from=deps /app/node_modules ./node_modules
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
 COPY . .
+EXPOSE 3001
+CMD ["npm", "run", "dev", "--", "-H", "0.0.0.0"]
 
-# Build Next.js application
-# This will create a standalone output for production
-RUN corepack enable pnpm && \
-    pnpm run build
+FROM dependencies AS builder
 
-# Runner stage
-FROM node:18-alpine AS runner
+ARG NEXT_PUBLIC_MAIN_BACKEND_URL=http://localhost:8124/api
+ARG NEXT_PUBLIC_AI_BACKEND_URL=http://localhost:8130
+ENV NEXT_PUBLIC_MAIN_BACKEND_URL=${NEXT_PUBLIC_MAIN_BACKEND_URL}
+ENV NEXT_PUBLIC_AI_BACKEND_URL=${NEXT_PUBLIC_AI_BACKEND_URL}
+ENV NEXT_STANDALONE=true
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS production
+
 WORKDIR /app
-
-# Set production environment
 ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 
-# Create non-root user for security
-RUN addgroup --system --gid 1001 nodejs && \
-    adduser --system --uid 1001 nextjs
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
 
-# Copy necessary files from builder
-COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
-# Switch to non-root user
 USER nextjs
-
-# Expose port
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"
 
-# Set port environment variable
-ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})" || exit 1
-
-# Run the application
 CMD ["node", "server.js"]

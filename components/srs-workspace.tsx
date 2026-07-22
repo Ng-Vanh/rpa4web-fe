@@ -20,6 +20,7 @@ import { UsecaseEvaluatePanel } from "@/components/usecase-evaluate-panel"
 import { processTrackingHeading } from "@/service/tracking-heading"
 import { extractTableContentItems, processTrackingTable } from "@/service/tracking-table"
 import { getUsecaseAnalyses, processTrackingUsecase } from "@/service/tracking-usecase"
+import { MAIN_API_BASE_URL } from "@/service/api-client"
 
 interface SRSWorkspaceProps {
   srs: any
@@ -74,7 +75,7 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       setLoadingExisting(true)
       try {
         console.log("Checking existing scenarios for SRS ID:", srs.id)
-        console.log("API URL:", `${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/srs/${srs.id}`)
+        console.log("API URL:", `${MAIN_API_BASE_URL}/scenarios/srs/${srs.id}`)
         
         const list = await getScenariosBySrsId(srs.id)
         console.log("Existing scenarios response:", list)
@@ -471,7 +472,7 @@ export function SRSWorkspace({ srs, onBack }: SRSWorkspaceProps) {
       ;(async () => {
         try {
           console.log("Loading scenarios for SRS ID:", srs.id)
-          console.log("API URL:", `${process.env.NEXT_PUBLIC_MAIN_BACKEND_URL}/scenarios/srs/${srs.id}`)
+          console.log("API URL:", `${MAIN_API_BASE_URL}/scenarios/srs/${srs.id}`)
           
           const list = await getScenariosBySrsId(srs.id)
           console.log("Raw API response:", list)
